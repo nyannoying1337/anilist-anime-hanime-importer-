@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AniList Paste Import</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <header class="topBar">
+      <div class="topBarLeft">
+        <div class="title">AniList Paste Import</div>
+        <div class="subtitle">Fetch/paste → preview → import</div>
+      </div>
+
+      <div class="topBarCenter">
+        <div id="progressWrap" class="progressWrap" style="display:none;">
+          <div class="progressTop">
+            <div id="progressLabel" class="progressLabel"></div>
+            <div id="progressMeta" class="progressMeta"></div>
+          </div>
+          <div class="progressBar">
+            <div id="progressBarFill" class="progressBarFill" style="width:0%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="topBarRight">
+        <button id="sourceBtn" class="btn btnSecondary" type="button">Source</button>
+        <button id="settingsBtn" class="btn btnSecondary" type="button">Settings</button>
+        <button id="logBtn" class="btn btnSecondary" type="button">Log</button>
+        <div class="divider"></div>
+        <label class="topSelect">
+          <span class="topSelectLabel">Default status</span>
+          <select id="defaultStatus" class="select">
+            <option value="PLANNING">Planning</option>
+            <option value="CURRENT">Watching</option>
+            <option value="COMPLETED" selected>Completed</option>
+            <option value="PAUSED">Paused</option>
+            <option value="DROPPED">Dropped</option>
+            <option value="REPEATING">Repeating</option>
+          </select>
+        </label>
+        <button id="previewBtn" class="btn btnPrimary" type="button">Preview</button>
+        <button id="importBtn" class="btn btnSecondary" type="button" disabled>Import</button>
+        <button id="authBtn" class="btn btnSecondary" type="button">Sign in</button>
+      </div>
+    </header>
+
+    <div id="runBanner" class="runBanner" style="display:none;">
+      <div class="runBannerInner">
+        <div class="runBannerTitle">Working…</div>
+        <div id="runBannerText" class="runBannerText">Preview/import is running. Don’t close or refresh this page.</div>
+        <div class="spacer"></div>
+        <button id="runBannerHideBtn" class="btn btnSecondary" type="button">Hide</button>
+      </div>
+    </div>
+
+    <main class="workspace">
+      <div class="workspaceHeader">
+        <div class="sectionTitle">Preview</div>
+        <div class="workspaceHeaderRight">
+          <label class="inlineToggle">
+            <input id="hideExistingCheckbox" type="checkbox" />
+            <span>Hide already on AniList</span>
+          </label>
+          <div class="filterGroup">
+            <label class="inlineToggle">
+              <input id="filterMatched" type="checkbox" />
+              <span>Matched</span>
+            </label>
+            <label class="inlineToggle">
+              <input id="filterAmbiguous" type="checkbox" />
+              <span>Ambiguous</span>
+            </label>
+            <label class="inlineToggle">
+              <input id="filterUnmatched" type="checkbox" />
+              <span>Unmatched</span>
+            </label>
+          </div>
+          <div id="previewSummary" class="summary"></div>
+        </div>
+      </div>
+
+      <div id="previewTableWrap" class="tableMain"></div>
+    </main>
+
+    <dialog id="sourceDialog" class="modalSheet">
+      <form method="dialog" class="modalInner">
+        <div class="modalHeader">
+          <div class="modalTitle">Source</div>
+          <button class="btn btnSecondary" value="cancel">Close</button>
+        </div>
+
+        <div class="modalBody">
+          <div class="tabs">
+            <button id="sourceTabPaste" class="tab tabActive" type="button">Paste</button>
+            <button id="sourceTabHanime" class="tab" type="button">Hanime</button>
+          </div>
+
+          <div id="sourcePanePaste" class="tabPane tabPaneActive">
+            <label class="field">
+              <div class="label">Paste titles (one per line)</div>
+              <textarea id="titlesInput" class="textarea" rows="12" placeholder="One title per line"></textarea>
+            </label>
+            <div class="help">Tip: bullets/numbers are cleaned automatically.</div>
+          </div>
+
+          <div id="sourcePaneHanime" class="tabPane">
+            <label class="field">
+              <div class="label">Playlist URL</div>
+              <input id="hanimePlaylistUrlInput" class="input" placeholder="https://hanime.tv/playlists/liked-videos-…" />
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+              <input id="hanimeFillOnlyCheckbox" type="checkbox" />
+              <span style="color: var(--muted); font-size: 13px;">Only fill (don’t auto-preview)</span>
+            </label>
+            <button id="hanimeFetchBtn" class="btn btnPrimary" type="button" style="margin-top:10px; width:100%;">Fetch from Hanime</button>
+            <div class="help">Requires Hanime sign-in or session token (Settings).</div>
+          </div>
+
+          <div class="help" style="margin-top: 14px;">
+            Default status is set in the top bar.
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="settingsDialog" class="modalSheet">
+      <form method="dialog" class="modalInner">
+        <div class="modalHeader">
+          <div class="modalTitle">Settings</div>
+          <button class="btn btnSecondary" value="cancel">Close</button>
+        </div>
+
+        <div class="modalBody">
+          <div class="tabs">
+            <button id="settingsTabAnilist" class="tab tabActive" type="button">AniList</button>
+            <button id="settingsTabHanime" class="tab" type="button">Hanime</button>
+          </div>
+
+          <div id="settingsPaneAnilist" class="tabPane tabPaneActive">
+            <label class="field">
+              <div class="label">AniList Client ID</div>
+              <input id="clientIdInput" class="input" placeholder="e.g. 12345" />
+              <div class="help">
+                Create a client in AniList developer settings. Redirect URL should match this page URL
+                (e.g. <code>http://localhost:5173/</code>).
+              </div>
+            </label>
+
+            <div class="row rowWrap" style="margin-top: 12px;">
+              <label class="field" style="min-width: 360px; flex: 1;">
+                <div class="label">AniList GDPR export (optional)</div>
+                <input id="gdprFileInput" class="input" type="file" accept="application/json,.json" />
+                <div class="help">
+                  Load your AniList <code>gdpr_data.json</code> to mark “already on AniList” instantly (no network).
+                  This file is kept in memory only and is never uploaded anywhere.
+                </div>
+              </label>
+              <div class="field" style="min-width: 240px;">
+                <div class="label">Existing list cache</div>
+                <div class="row">
+                  <button id="gdprLoadBtn" class="btn btnSecondary" type="button">Load</button>
+                  <button id="gdprClearBtn" class="btn btnDanger" type="button">Clear</button>
+                </div>
+                <div id="gdprStatus" class="help" style="margin-top: 8px;">Not loaded.</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="settingsPaneHanime" class="tabPane">
+            <label class="field">
+              <div class="label">Hanime session token</div>
+              <input id="hanimeSessionTokenInput" class="input" placeholder="Paste x-session-token here" />
+              <div class="help">
+                Paste either the raw token or a cookie string (e.g. <code>htv3session=...</code>). Stored locally in your browser and only sent to your local server.
+              </div>
+            </label>
+            <div class="row rowWrap" style="margin-top: 10px;">
+              <label class="field" style="min-width: 280px; flex: 1;">
+                <div class="label">Hanime email</div>
+                <input id="hanimeEmailInput" class="input" placeholder="email@example.com" />
+              </label>
+              <label class="field" style="min-width: 280px; flex: 1;">
+                <div class="label">Hanime password</div>
+                <input id="hanimePasswordInput" class="input" type="password" placeholder="••••••••" />
+              </label>
+              <button id="hanimeLoginBtn" class="btn btnSecondary" type="button">Sign in to Hanime</button>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top: 12px;">
+            <button id="clearTokenBtn" class="btn btnDanger" type="button">Sign out</button>
+            <div class="spacer"></div>
+            <button id="saveSettingsBtn" class="btn btnPrimary" type="button">Save</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="logDialog" class="modalSheet">
+      <form method="dialog" class="modalInner">
+        <div class="modalHeader">
+          <div class="modalTitle">Log</div>
+          <div class="row" style="align-items:center;">
+            <button id="copyLogBtn" class="btn btnSecondary" type="button">Copy</button>
+            <button class="btn btnSecondary" value="cancel">Close</button>
+          </div>
+        </div>
+        <div class="modalBody">
+          <pre id="log" class="log"></pre>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="busyDialog" class="modalSheet">
+      <form method="dialog" class="modalInner">
+        <div class="modalHeader">
+          <div class="modalTitle">Working…</div>
+          <button class="btn btnSecondary" value="cancel">Hide</button>
+        </div>
+        <div class="modalBody">
+          <div class="help" style="margin-top: 6px;">
+            Sit tight — this can take a bit on large lists due to AniList rate limits.
+            You can watch progress in the top bar.
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="./src/app.js?v=20260414-3"></script>
+  </body>
+</html>
+
