@@ -1583,9 +1583,45 @@ function resolveCandidates(inputTitle, candidates) {
 
   const best = scored[0];
   const second = scored[1];
+  const sequelLike = (s) =>
+    /\b(?:part|season|staffel|cour)\s*\d+\b|\b(?:2nd|3rd|4th)\b|\bii\b|\biii\b|\biv\b/i.test(String(s || ""));
+  const pickLabel = (entry) => {
+    if (!entry) return "";
+    return (
+      entry.bestTitle ||
+      candidates.find((c) => c.id === entry.id)?.title?.english ||
+      candidates.find((c) => c.id === entry.id)?.title?.romaji ||
+      ""
+    );
+  };
 
   if (best?.exact) {
     return { status: "matched", selectedMediaId: best.id, reason: "Exact match (title/synonym)." };
+  }
+
+  // If the input looks like a base title and AniList returns both base + sequel variants
+  // with near-equal scores, prefer the non-sequel entry to reduce noisy ambiguity
+  // (example: "86" vs "86 Part 2").
+  {
+    const bestNonSequel = scored.find((x) => !sequelLike(pickLabel(x)));
+    const bestSequel = scored.find((x) => sequelLike(pickLabel(x)));
+    const nonSequelLabel = pickLabel(bestNonSequel);
+    const inputIsVeryShort = inputTokens.length <= 2 || inputNorm.length <= 6;
+    const sharesBase = inputNorm && normForMatch(nonSequelLabel).startsWith(inputNorm);
+    if (
+      bestNonSequel &&
+      bestSequel &&
+      inputIsVeryShort &&
+      sharesBase &&
+      bestNonSequel.score >= 0.84 &&
+      bestNonSequel.score + 0.015 >= bestSequel.score
+    ) {
+      return {
+        status: "matched",
+        selectedMediaId: bestNonSequel.id,
+        reason: `Base title favored over sequel variant (${nonSequelLabel || "best match"}).`,
+      };
+    }
   }
 
   // High-confidence auto-select.
