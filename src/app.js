@@ -932,9 +932,15 @@ async function runPreview() {
 
   previewRows = rows;
   // After we have selected media ids, check which ones already exist in the user's AniList.
-  if (hasToken()) {
+  // If GDPR cache is loaded, use it even without auth.
+  if (hasToken() || localExistingByMediaId) {
     try {
-      setProgress({ label: "Checking your AniList…", current: 0, total: null, meta: "Existing entries" });
+      setProgress({
+        label: localExistingByMediaId ? "Checking loaded GDPR cache…" : "Checking your AniList…",
+        current: 0,
+        total: null,
+        meta: "Existing entries",
+      });
       await markExistingRows();
     } catch (e) {
       log(`Could not check existing AniList entries: ${String(e?.message || e)}`);
@@ -966,6 +972,7 @@ async function runPreview() {
 async function markExistingRows() {
   // Prefer offline GDPR index if available.
   if (localExistingByMediaId) {
+    log(`Using GDPR cache for existing-entry check (${localExistingByMediaId.size} entries).`);
     cachedExistingMediaIds = new Set(localExistingByMediaId.keys());
     for (const r of previewRows) {
       if (!r) continue;
