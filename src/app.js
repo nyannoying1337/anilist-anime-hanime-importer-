@@ -652,7 +652,7 @@ function parseRawTitles(raw) {
   const out = [];
 
   for (const rawTitle of lines) {
-    const normalizedTitle = normalizeTitle(rawTitle);
+    const normalizedTitle = normalizeTitle(scrubSourceNoise(rawTitle));
     if (!normalizedTitle) continue;
     const key = normalizedTitle.toLowerCase();
     if (seen.has(key)) continue;
@@ -660,6 +660,18 @@ function parseRawTitles(raw) {
     out.push({ rawTitle, normalizedTitle });
   }
   return out;
+}
+
+function scrubSourceNoise(s) {
+  let v = String(s || "");
+  // Strip common source/export metadata that hurts AniList search quality.
+  v = v.replace(/\[(?:ger(?:man)?|deutsch|eng(?:lish)?|sub|dub|uncensored|censored|omu|raw|bd|bdrip|bluray|dvd|web-?dl|webrip|x264|x265|hevc|h\.?264|1080p|720p|480p|2160p|4k)[^\]]*\]/gi, " ");
+  v = v.replace(/\((?:ger(?:man)?|deutsch|eng(?:lish)?|sub|dub|uncensored|censored|omu|raw|bd|bdrip|bluray|dvd|web-?dl|webrip|x264|x265|hevc|h\.?264|1080p|720p|480p|2160p|4k)[^)]*\)/gi, " ");
+  v = v.replace(/\b(?:ger(?:man)?|deutsch|eng(?:lish)?)\s*(?:sub|dub)\b/gi, " ");
+  v = v.replace(/\b(?:sub(?:bed)?|dub(?:bed)?|uncensored|censored|omu|raw)\b/gi, " ");
+  v = v.replace(/\b(?:bd|bdrip|bluray|dvd|web-?dl|webrip|x264|x265|hevc|h\.?264|1080p|720p|480p|2160p|4k)\b/gi, " ");
+  v = v.replace(/\s*[-|]\s*(?:ger|eng|de|en)\s*(?:sub|dub)\s*$/i, " ");
+  return v.replace(/\s+/g, " ").trim();
 }
 
 function extractTitleFromMessyLine(line) {
@@ -1070,6 +1082,8 @@ function normForMatch(s) {
   // Drop common "branding" prefixes and noisy suffix phrases in adult titles.
   cleaned = cleaned.replace(/^(?:love me|i love)\s+/i, "");
   cleaned = cleaned.replace(/\bthe\s+animation\b/gi, "");
+  cleaned = cleaned.replace(/\banimeserie\b/gi, "");
+  cleaned = cleaned.replace(/\b(?:s(?:eason)?\s*\d+|staffel\s*\d+|cour\s*\d+|part\s*\d+)\b/gi, " ");
   // Japanese romanized particle equivalence (common AniList spelling differences)
   cleaned = cleaned.replace(/\bwo\b/gi, "o");
   cleaned = cleaned.replace(/\s+/g, " ").trim();
@@ -1535,6 +1549,7 @@ function resolveCandidates(inputTitle, candidates) {
 
     let best = 0;
     let bestTitle = null;
+    let bestJac = 0;
     for (const t of titleStrings) {
       const tn = normForMatch(t);
       if (!tn) continue;
@@ -1553,15 +1568,16 @@ function resolveCandidates(inputTitle, candidates) {
       if (s > best) {
         best = s;
         bestTitle = t;
+        bestJac = jac;
       }
     }
-    return { score: best, bestTitle, exact: false };
+    return { score: best, bestTitle, exact: false, jac: bestJac };
   };
 
   const scored = candidates
     .map((c) => {
       const r = scoreCandidate(c);
-      return { id: c.id, score: r.score, exact: r.exact, bestTitle: r.bestTitle };
+      return { id: c.id, score: r.score, exact: r.exact, bestTitle: r.bestTitle, jac: r.jac ?? 0 };
     })
     .sort((a, b) => b.score - a.score);
 
@@ -1576,6 +1592,13 @@ function resolveCandidates(inputTitle, candidates) {
   if (best && best.score >= 0.93 && (!second || best.score - second.score >= 0.06)) {
     const hint = best.bestTitle ? ` (${best.bestTitle})` : "";
     return { status: "matched", selectedMediaId: best.id, reason: `High-confidence match${hint}.` };
+  }
+
+  // Medium-confidence auto-select for noisy source names (e.g., proxer exports)
+  // when one candidate clearly dominates and has solid token overlap.
+  if (best && best.score >= 0.88 && best.jac >= 0.55 && (!second || best.score - second.score >= 0.035)) {
+    const hint = best.bestTitle ? ` (${best.bestTitle})` : "";
+    return { status: "matched", selectedMediaId: best.id, reason: `Dominant match from noisy title${hint}.` };
   }
 
   // Adult content: AniList often returns many close variants; if the top adult candidate
