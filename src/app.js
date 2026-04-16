@@ -34,6 +34,11 @@ const el = {
   defaultStatus: document.getElementById("defaultStatus"),
   titlesInput: document.getElementById("titlesInput"),
   previewSummary: document.getElementById("previewSummary"),
+  previewPager: document.getElementById("previewPager"),
+  previewPrevBtn: document.getElementById("previewPrevBtn"),
+  previewNextBtn: document.getElementById("previewNextBtn"),
+  previewPageLabel: document.getElementById("previewPageLabel"),
+  previewPageSizeSelect: document.getElementById("previewPageSizeSelect"),
   previewTableWrap: document.getElementById("previewTableWrap"),
   log: document.getElementById("log"),
   progressWrap: document.getElementById("progressWrap"),
@@ -81,6 +86,8 @@ const el = {
 
 /** @type {PreviewRow[]} */
 let previewRows = [];
+let previewPage = 1;
+let previewPageSize = 100;
 
 /** @type {number|null} */
 let cachedViewerId = null;
@@ -151,6 +158,7 @@ function init() {
     el.hideExistingCheckbox.checked = getHideExisting();
     el.hideExistingCheckbox.addEventListener("change", () => {
       localStorage.setItem(STORAGE_KEYS.hideExisting, el.hideExistingCheckbox.checked ? "1" : "0");
+      previewPage = 1;
       renderPreviewTable();
       renderSummary();
       refreshImportUi();
@@ -161,6 +169,7 @@ function init() {
     checkboxEl.checked = (localStorage.getItem(key) ?? (defaultOn ? "1" : "0")) === "1";
     checkboxEl.addEventListener("change", () => {
       localStorage.setItem(key, checkboxEl.checked ? "1" : "0");
+      previewPage = 1;
       renderPreviewTable();
       renderSummary();
       refreshImportUi();
@@ -169,6 +178,28 @@ function init() {
   bindFilter(el.filterMatched, STORAGE_KEYS.filterMatched, true);
   bindFilter(el.filterAmbiguous, STORAGE_KEYS.filterAmbiguous, true);
   bindFilter(el.filterUnmatched, STORAGE_KEYS.filterUnmatched, true);
+
+  if (el.previewPrevBtn) {
+    el.previewPrevBtn.addEventListener("click", () => {
+      previewPage = Math.max(1, previewPage - 1);
+      renderPreviewTable();
+    });
+  }
+  if (el.previewNextBtn) {
+    el.previewNextBtn.addEventListener("click", () => {
+      previewPage += 1;
+      renderPreviewTable();
+    });
+  }
+  if (el.previewPageSizeSelect) {
+    el.previewPageSizeSelect.value = String(previewPageSize);
+    el.previewPageSizeSelect.addEventListener("change", () => {
+      const size = Number(el.previewPageSizeSelect.value);
+      previewPageSize = Number.isFinite(size) && size > 0 ? size : 100;
+      previewPage = 1;
+      renderPreviewTable();
+    });
+  }
 
   // AniList GDPR export loader (offline "already in list" detection)
   const refreshGdprStatus = () => {
@@ -772,6 +803,7 @@ async function hanimeLogin(email, password) {
 
 async function runPreview() {
   setRunningState(true, "Preview is running. Don’t close or refresh this page.");
+  previewPage = 1;
   const titlesText = el.titlesInput.value || "";
   const parsedRaw = parseRawTitles(titlesText);
   const parsed = groupEpisodeLikeTitles(parsedRaw);
@@ -779,6 +811,7 @@ async function runPreview() {
     previewRows = [];
     el.previewSummary.textContent = "No titles detected yet.";
     el.previewTableWrap.innerHTML = "";
+    updatePreviewPager(0, 0, 0, 1);
     setRunningState(false);
     return;
   }
@@ -1153,7 +1186,12 @@ function renderPreviewTable() {
   `;
   const tbody = table.querySelector("tbody");
 
-  const rows = getFilteredPreviewRows();
+  const allRows = getFilteredPreviewRows();
+  const pageCount = clampPreviewPage(allRows.length);
+  const start = (previewPage - 1) * previewPageSize;
+  const end = Math.min(start + previewPageSize, allRows.length);
+  const rows = allRows.slice(start, end);
+  updatePreviewPager(allRows.length, start, end, pageCount);
   rows.forEach(({ row, idx }) => {
     const tr = document.createElement("tr");
     const pill = renderStatusPill(row.status, row.existsInAniList);
@@ -1174,6 +1212,22 @@ function renderPreviewTable() {
 
   el.previewTableWrap.innerHTML = "";
   el.previewTableWrap.appendChild(table);
+}
+
+function clampPreviewPage(totalRows) {
+  const pageCount = Math.max(1, Math.ceil(totalRows / previewPageSize));
+  previewPage = Math.min(Math.max(1, previewPage), pageCount);
+  return pageCount;
+}
+
+function updatePreviewPager(totalRows, start, end, pageCount) {
+  if (!el.previewPageLabel) return;
+  const hasRows = totalRows > 0;
+  el.previewPageLabel.textContent = hasRows
+    ? `Rows ${start + 1}–${end} of ${totalRows} (Page ${previewPage}/${pageCount})`
+    : "Rows 0–0 of 0";
+  if (el.previewPrevBtn) el.previewPrevBtn.disabled = !hasRows || previewPage <= 1;
+  if (el.previewNextBtn) el.previewNextBtn.disabled = !hasRows || previewPage >= pageCount;
 }
 
 function renderStatusPill(status, existsInAniList) {

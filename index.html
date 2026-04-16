@@ -61,6 +61,19 @@
       <div class="workspaceHeader">
         <div class="sectionTitle">Preview</div>
         <div class="workspaceHeaderRight">
+          <div id="previewPager" class="previewPager" aria-live="polite">
+            <button id="previewPrevBtn" class="btn btnSecondary" type="button">Prev</button>
+            <span id="previewPageLabel" class="previewPageLabel">Rows 0–0 of 0</span>
+            <button id="previewNextBtn" class="btn btnSecondary" type="button">Next</button>
+            <label class="previewPageSizeWrap">
+              <span>Page size</span>
+              <select id="previewPageSizeSelect" class="select previewPageSizeSelect">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+              </select>
+            </label>
+          </div>
           <label class="inlineToggle">
             <input id="hideExistingCheckbox" type="checkbox" />
             <span>Hide already on AniList</span>
@@ -233,4 +246,3 @@
     <script type="module" src="./src/app.js?v=20260414-3"></script>
   </body>
 </html>
-
