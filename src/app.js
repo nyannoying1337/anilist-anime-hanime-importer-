@@ -104,6 +104,8 @@ let saw429Recently = false;
 
 /** @type {Map<number, {status?:string, progress?:number}>|null} */
 let localExistingByMediaId = null;
+/** @type {Map<string, Set<number>>|null} */
+let localExistingTitleIndex = null;
 
 init();
 
@@ -218,18 +220,31 @@ function init() {
     try {
       el.gdprLoadBtn.disabled = true;
       el.gdprLoadBtn.textContent = "Loading…";
-      localExistingByMediaId = await parseAniListGdprFile(file);
+      const text = await file.text();
+      const json = JSON.parse(text);
+      localExistingByMediaId = await parseAniListGdprFile(json);
+      localExistingTitleIndex = buildGdprTitleIndex(json);
       refreshGdprStatus();
-      log(`Loaded GDPR export (${localExistingByMediaId.size} entries).`);
+      log(`Loaded GDPR export (${localExistingByMediaId.size} entries, ${localExistingTitleIndex?.size || 0} title keys).`);
       // Re-apply offline existing markers if a preview is already present.
       if (previewRows?.length) {
         await markExistingRows();
         renderPreviewTable();
         renderSummary();
         refreshImportUi();
+        const shownNow = getFilteredPreviewRows().length;
+        if (shownNow === 0 && getHideExisting() && previewRows.some((r) => r?.existsInAniList)) {
+          localStorage.setItem(STORAGE_KEYS.hideExisting, "0");
+          if (el.hideExistingCheckbox) el.hideExistingCheckbox.checked = false;
+          renderPreviewTable();
+          renderSummary();
+          refreshImportUi();
+          log("All rows were hidden by “Hide already on AniList”, so it was turned off automatically.");
+        }
       }
     } catch (e) {
       localExistingByMediaId = null;
+      localExistingTitleIndex = null;
       refreshGdprStatus();
       log(`Failed to load GDPR export: ${String(e?.message || e)}`);
     } finally {
@@ -240,6 +255,7 @@ function init() {
 
   el.gdprClearBtn?.addEventListener("click", async () => {
     localExistingByMediaId = null;
+    localExistingTitleIndex = null;
     refreshGdprStatus();
     cachedExistingMediaIds = new Set();
     for (const r of previewRows || []) {
@@ -424,9 +440,11 @@ function setRunningState(running, text) {
     : null;
 }
 
-async function parseAniListGdprFile(file) {
-  const text = await file.text();
-  const json = JSON.parse(text);
+async function parseAniListGdprFile(fileOrJson) {
+  const json =
+    fileOrJson && typeof fileOrJson === "object" && typeof fileOrJson.text === "function"
+      ? JSON.parse(await fileOrJson.text())
+      : fileOrJson;
   const rows = Array.isArray(json?.lists) ? json.lists : [];
   /** @type {Map<number, {status?:string, progress?:number}>} */
   const out = new Map();
@@ -443,8 +461,30 @@ async function parseAniListGdprFile(file) {
   return out;
 }
 
+function buildGdprTitleIndex(json) {
+  const rows = Array.isArray(json?.lists) ? json.lists : [];
+  /** @type {Map<string, Set<number>>} */
+  const idx = new Map();
+  const add = (title, mediaId) => {
+    const key = normForMatch(title);
+    if (!key) return;
+    const set = idx.get(key) ?? new Set();
+    set.add(mediaId);
+    idx.set(key, set);
+  };
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const mediaId = Number(r.series_id ?? r.seriesId ?? r.media_id ?? r.mediaId);
+    if (!Number.isFinite(mediaId)) continue;
+    add(r.series_title ?? r.title ?? r.name, mediaId);
+    add(r.title_english ?? r.english_title, mediaId);
+    add(r.title_romaji ?? r.romaji_title, mediaId);
+  }
+  return idx;
+}
+
 function getHideExisting() {
-  return (localStorage.getItem(STORAGE_KEYS.hideExisting) || "1") === "1";
+  return (localStorage.getItem(STORAGE_KEYS.hideExisting) || "0") === "1";
 }
 
 function getStatusFilters() {
@@ -872,6 +912,27 @@ async function runPreview() {
 
   const processOne = async (i) => {
     const { rawTitle, normalizedTitle } = parsed[i];
+    const localKey = normForMatch(normalizedTitle);
+    const localIds = localExistingTitleIndex?.get(localKey) ? Array.from(localExistingTitleIndex.get(localKey)) : [];
+    if (localIds.length === 1) {
+      const mediaId = Number(localIds[0]);
+      rows[i] = {
+        rawTitle,
+        normalizedTitle,
+        status: "matched",
+        candidates: [{ id: mediaId, title: { romaji: normalizedTitle }, seasonYear: undefined, format: undefined, isAdult: undefined, synonyms: [], siteUrl: undefined }],
+        selectedMediaId: mediaId,
+        episodeNumbers: parsed[i].episodeNumbers,
+        existsInAniList: true,
+        existingEntry: localExistingByMediaId?.get(mediaId) || null,
+        reason: "Matched from GDPR cache (local title index).",
+      };
+      done++;
+      bumpProgress(done, total, rawTitle);
+      maybeRender(false);
+      return;
+    }
+
     const { candidates, usedQuery, attempts } = await cachedSearchAnimeWithFallback(normalizedTitle);
     const resolved = resolveCandidates(normalizedTitle, candidates);
     rows[i] = {
