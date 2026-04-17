@@ -1,0 +1,31 @@
+{
+  "name": "anilist-anime-hanime-importer-",
+  "version": "1.0.0",
+  "description": "Local, paste-based importer for AniList:",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nyannoying1337/anilist-anime-hanime-importer-.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/nyannoying1337/anilist-anime-hanime-importer-/issues"
+  },
+  "homepage": "https://github.com/nyannoying1337/anilist-anime-hanime-importer-#readme",
+  "dependencies": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "vite": "^8.0.8"
+  }
+}
