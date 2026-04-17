@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   filterMatched: "anilistPasteImport.preview.filter.matched",
   filterAmbiguous: "anilistPasteImport.preview.filter.ambiguous",
   filterUnmatched: "anilistPasteImport.preview.filter.unmatched",
+  gdprLocalOnly: "anilistPasteImport.gdpr.localOnly",
   draftTitles: "anilistPasteImport.draft.titles",
   previewCache: "anilistPasteImport.preview.cache.v2",
 };
@@ -75,6 +76,7 @@ const el = {
   gdprLoadBtn: document.getElementById("gdprLoadBtn"),
   gdprClearBtn: document.getElementById("gdprClearBtn"),
   gdprStatus: document.getElementById("gdprStatus"),
+  gdprLocalOnlyCheckbox: document.getElementById("gdprLocalOnlyCheckbox"),
   busyDialog: document.getElementById("busyDialog"),
   runBanner: document.getElementById("runBanner"),
   runBannerText: document.getElementById("runBannerText"),
@@ -214,6 +216,17 @@ function init() {
     el.gdprStatus.textContent = localExistingByMediaId ? `Loaded ${n} entry/entries.` : "Not loaded.";
   };
   refreshGdprStatus();
+  if (el.gdprLocalOnlyCheckbox) {
+    el.gdprLocalOnlyCheckbox.checked = getGdprLocalOnly();
+    el.gdprLocalOnlyCheckbox.addEventListener("change", () => {
+      localStorage.setItem(STORAGE_KEYS.gdprLocalOnly, el.gdprLocalOnlyCheckbox.checked ? "1" : "0");
+      if (el.gdprLocalOnlyCheckbox.checked) {
+        log("GDPR local-only mode enabled: AniList search fallback will be skipped during preview.");
+      } else {
+        log("GDPR local-only mode disabled: AniList search fallback is allowed.");
+      }
+    });
+  }
 
   el.gdprLoadBtn?.addEventListener("click", async () => {
     const file = el.gdprFileInput?.files?.[0] || null;
@@ -235,6 +248,9 @@ function init() {
       log(
         `Loaded GDPR export (${localExistingByMediaId.size} entries, ${localExistingTitleIndex?.size || 0} title keys, ${localExistingTitleRecords.length} title records).`
       );
+      if (!localExistingTitleRecords.length) {
+        log("This GDPR file has list IDs but no usable title fields. Local title matching will be limited.");
+      }
       // Re-apply offline existing markers if a preview is already present.
       if (previewRows?.length) {
         await markExistingRows();
@@ -556,6 +572,10 @@ function resolveFromGdprTitles(inputTitle) {
 
 function getHideExisting() {
   return (localStorage.getItem(STORAGE_KEYS.hideExisting) || "0") === "1";
+}
+
+function getGdprLocalOnly() {
+  return (localStorage.getItem(STORAGE_KEYS.gdprLocalOnly) || "0") === "1";
 }
 
 function getStatusFilters() {
@@ -943,8 +963,9 @@ async function runPreview() {
   try { localStorage.removeItem(STORAGE_KEYS.previewCache); } catch {}
 
   log(`Previewing ${parsed.length} title(s)…`);
-  setProgress({ label: "Searching AniList…", current: 0, total: parsed.length, meta: "Preview" });
-  el.previewSummary.textContent = "Searching AniList…";
+  const localOnlyPreview = Boolean(localExistingByMediaId && getGdprLocalOnly());
+  setProgress({ label: localOnlyPreview ? "Matching with GDPR cache…" : "Searching AniList…", current: 0, total: parsed.length, meta: "Preview" });
+  el.previewSummary.textContent = localOnlyPreview ? "Matching with GDPR cache…" : "Searching AniList…";
   el.previewTableWrap.innerHTML = "";
   cachedExistingMediaIds = new Set();
   saw429Recently = false;
@@ -1000,6 +1021,23 @@ async function runPreview() {
           localResolved.confidence === "exact"
             ? "Matched from GDPR cache (exact local title)."
             : "Matched from GDPR cache (high-confidence local title).",
+      };
+      done++;
+      bumpProgress(done, total, rawTitle);
+      maybeRender(false);
+      return;
+    }
+    if (localExistingByMediaId && getGdprLocalOnly()) {
+      rows[i] = {
+        rawTitle,
+        normalizedTitle,
+        status: "unmatched",
+        candidates: [],
+        selectedMediaId: null,
+        episodeNumbers: parsed[i].episodeNumbers,
+        existsInAniList: false,
+        existingEntry: null,
+        reason: "Not found in GDPR cache (local-only mode: AniList search skipped).",
       };
       done++;
       bumpProgress(done, total, rawTitle);
