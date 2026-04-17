@@ -909,6 +909,8 @@ function extractTitleFromMessyLine(line) {
 
   // Drop obvious non-title rows from tabular exports.
   if (/^\[\s*Detailansicht\s*\]$/i.test(s)) return "";
+  if (/^\d+\s*\/\s*\d+\s*\[\s*Detailansicht\s*\]\s*$/i.test(s)) return "";
+  if (/^(TV|OVA|ONA|OAD|Movie|Special|Hentai|Animeserie)$/i.test(s)) return "";
 
   // Common "format/episodes" continuation rows in some exports (often on the next line).
   if (/^(TV|OVA|ONA|OAD|Movie|Special)\b/i.test(s) && /\t|-\s*\d+\s*\/\s*\d+/.test(s)) return "";
@@ -929,11 +931,28 @@ function extractTitleFromMessyLine(line) {
     }
   }
 
-  // Space-separated fallback: "Abgeschlossen   Title   Movie ..."
-  const m = s.match(
-    /^(abgeschlossen|airing|nicht erschienen(?:\s*\(pre-?airing\))?)\s+(.+?)\s+(animeserie|movie|hentai|special|tv|ova|ona|oad)\b/i
-  );
-  if (m?.[2]) return m[2].trim();
+  // Proxer-like export rows:
+  // "Abgeschlossen   <Title>   Animeserie"
+  // "Abgeschlossen   \"Bungaku Shoujo\"   Movie   1 / 1 [ Detailansicht ]"
+  const statusRe = "(?:abgeschlossen|airing|nicht erschienen(?:\\s*\\(pre-?airing\\))?)";
+  const fmtRe = "(?:animeserie|movie|hentai|special|tv|ova|ona|oad)";
+  const m = s.match(new RegExp(`^${statusRe}\\s+(.+?)\\s+${fmtRe}\\b`, "i"));
+  if (m?.[1]) {
+    const t = m[1].trim().replace(/^["“”']+|["“”']+$/g, "").trim();
+    if (t) return t;
+  }
+
+  // If line starts with a status label but format token is missing, salvage middle text.
+  const mLoose = s.match(new RegExp(`^${statusRe}\\s+(.+)$`, "i"));
+  if (mLoose?.[1]) {
+    const cleaned = mLoose[1]
+      .replace(/\s+\d+\s*\/\s*\d+\s*\[\s*detailansicht\s*\]\s*$/i, "")
+      .replace(/\[\s*detailansicht\s*\]\s*$/i, "")
+      .trim()
+      .replace(/^["“”']+|["“”']+$/g, "")
+      .trim();
+    if (cleaned && !/^\d+\s*\/\s*\d+$/i.test(cleaned)) return cleaned;
+  }
 
   // Remove trailing "[ Detailansicht ]" if it's on the same line.
   return s.replace(/\[\s*Detailansicht\s*\]\s*$/i, "").trim();
