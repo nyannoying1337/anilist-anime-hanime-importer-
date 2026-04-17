@@ -35,6 +35,9 @@ const el = {
   previewBtn: document.getElementById("previewBtn"),
   importBtn: document.getElementById("importBtn"),
   defaultStatus: document.getElementById("defaultStatus"),
+  workflowStep1: document.getElementById("workflowStep1"),
+  workflowStep2: document.getElementById("workflowStep2"),
+  workflowStep3: document.getElementById("workflowStep3"),
   titlesInput: document.getElementById("titlesInput"),
   previewSummary: document.getElementById("previewSummary"),
   previewPager: document.getElementById("previewPager"),
@@ -94,6 +97,7 @@ const el = {
 let previewRows = [];
 let previewPage = 1;
 let previewPageSize = 100;
+let _isRunning = false;
 
 /** @type {number|null} */
 let cachedViewerId = null;
@@ -328,6 +332,7 @@ function init() {
 
   el.titlesInput.addEventListener("input", () => {
     try { localStorage.setItem(STORAGE_KEYS.draftTitles, el.titlesInput.value || ""); } catch {}
+    refreshWorkflowUi();
   });
 
   el.copyLogBtn?.addEventListener("click", async () => {
@@ -466,6 +471,22 @@ function init() {
       refreshImportUi();
     }
   });
+  refreshWorkflowUi();
+}
+
+function refreshWorkflowUi() {
+  const hasTitles = Boolean((el.titlesInput?.value || "").trim());
+  const hasPreview = Array.isArray(previewRows) && previewRows.some(Boolean);
+  if (el.previewBtn) el.previewBtn.disabled = !hasTitles || _isRunning;
+
+  const setStep = (stepEl, active) => {
+    if (!stepEl) return;
+    stepEl.classList.toggle("isActive", active);
+    stepEl.classList.toggle("isMuted", !active);
+  };
+  setStep(el.workflowStep1, !hasTitles);
+  setStep(el.workflowStep2, hasTitles && !hasPreview);
+  setStep(el.workflowStep3, hasPreview);
 }
 
 function loadAliasMemory() {
@@ -510,7 +531,6 @@ function rememberAlias(inputTitle, mediaId, mediaTitle) {
   refreshAliasMemoryUi();
 }
 
-let _isRunning = false;
 function setRunningState(running, text) {
   _isRunning = Boolean(running);
   if (el.runBanner) el.runBanner.style.display = running ? "block" : "none";
@@ -830,6 +850,7 @@ function refreshImportUi() {
     previewRows.length > 0 &&
     previewRows.some((r) => r.selectedMediaId != null && !r.existsInAniList);
   el.importBtn.disabled = !canImport;
+  refreshWorkflowUi();
 }
 
 function startOAuthImplicit(clientId) {

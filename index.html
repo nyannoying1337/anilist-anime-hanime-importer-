@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AniList Paste Import</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
-    <link rel="stylesheet" href="./src/styles.css?v=20260417-1" />
+    <link rel="stylesheet" href="./src/styles.css?v=20260417-2" />
   </head>
   <body>
     <header class="topBar">
@@ -44,7 +44,7 @@
 
     <main class="workspace">
       <section class="workflowCard" aria-label="Import workflow">
-        <div class="workflowStep">
+        <div id="workflowStep1" class="workflowStep">
           <div class="workflowNum">1</div>
           <div class="workflowBody">
             <div class="workflowTitle">Set source</div>
@@ -52,7 +52,7 @@
           </div>
           <button id="sourceOpenBtn" class="btn btnSecondary" type="button">Open Source</button>
         </div>
-        <div class="workflowStep">
+        <div id="workflowStep2" class="workflowStep">
           <div class="workflowNum">2</div>
           <div class="workflowBody">
             <div class="workflowTitle">Preview matches</div>
@@ -60,7 +60,7 @@
           </div>
           <button id="previewBtn" class="btn btnPrimary" type="button">Run Preview</button>
         </div>
-        <div class="workflowStep">
+        <div id="workflowStep3" class="workflowStep">
           <div class="workflowNum">3</div>
           <div class="workflowBody">
             <div class="workflowTitle">Import to AniList</div>
@@ -81,33 +81,6 @@
             <button id="authBtn" class="btn btnSecondary" type="button">Sign in</button>
             <button id="importBtn" class="btn btnPrimary" type="button" disabled>Import</button>
           </div>
-        </div>
-      </section>
-
-      <section class="quickStart" aria-label="Quick start">
-        <div class="quickStartTitle">Quick start</div>
-        <div class="quickStartGrid">
-          <article class="quickStep">
-            <div class="quickStepNum">1</div>
-            <div class="quickStepBody">
-              <div class="quickStepLabel">Set up</div>
-              <div class="quickStepText">Open <strong>Settings</strong>, add AniList Client ID, optionally load your <code>gdpr_data.json</code>.</div>
-            </div>
-          </article>
-          <article class="quickStep">
-            <div class="quickStepNum">2</div>
-            <div class="quickStepBody">
-              <div class="quickStepLabel">Choose source</div>
-              <div class="quickStepText">Open <strong>Source</strong>, paste titles (or fetch from Hanime), then click <strong>Preview</strong>.</div>
-            </div>
-          </article>
-          <article class="quickStep">
-            <div class="quickStepNum">3</div>
-            <div class="quickStepBody">
-              <div class="quickStepLabel">Confirm & import</div>
-              <div class="quickStepText">Review ambiguous matches, then click <strong>Import</strong> when ready.</div>
-            </div>
-          </article>
         </div>
       </section>
 
@@ -307,6 +280,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./src/app.js?v=20260417-1"></script>
+    <script type="module" src="./src/app.js?v=20260417-2"></script>
   </body>
 </html>
