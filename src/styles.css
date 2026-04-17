@@ -53,6 +53,7 @@ code{ color:#d7defa; }
 .topBarLeft{ min-width: 240px; }
 .topBarCenter{ flex: 1; min-width: 260px; }
 .topBarRight{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+.topBarRight > *{ margin: 0; }
 .divider{ width: 1px; height: 28px; background: rgba(255,255,255,.10); }
 
 .topSelect{
@@ -91,17 +92,70 @@ code{ color:#d7defa; }
   max-width: none;
   margin: 0 auto;
   padding: 14px 16px 18px;
-  height: calc(100vh - 72px);
+  min-height: calc(100vh - 72px);
   display:flex;
   flex-direction:column;
   gap: 12px;
 }
+.quickStart{
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0,0,0,.16);
+  padding: 12px;
+}
+.quickStartTitle{
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+.quickStartGrid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 10px;
+}
+.quickStep{
+  display:flex;
+  align-items:flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  background: rgba(255,255,255,.02);
+}
+.quickStepNum{
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display:grid;
+  place-items:center;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+  border: 1px solid rgba(106,166,255,.45);
+  background: rgba(106,166,255,.15);
+  flex: 0 0 auto;
+}
+.quickStepBody{ min-width: 0; }
+.quickStepLabel{
+  font-weight: 750;
+  margin-bottom: 4px;
+}
+.quickStepText{
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
 .workspaceHeader{
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap: 12px;
   flex-wrap: wrap;
+  padding: 8px 0;
+  background: linear-gradient(180deg, rgba(11,16,32,.96), rgba(11,16,32,.84));
+  backdrop-filter: blur(8px);
 }
 .workspaceHeaderRight{
   display:flex;
@@ -507,5 +561,6 @@ thead th{
 @media (max-width: 980px){
   .topBar{ position: static; flex-direction: column; align-items: stretch; }
   .workspace{ height: auto; }
+  .quickStartGrid{ grid-template-columns: 1fr; }
   .tableCard{ min-height: 320px; }
 }
