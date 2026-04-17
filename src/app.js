@@ -516,20 +516,41 @@ function buildGdprTitleIndex(json) {
     add(r.series_title ?? r.title ?? r.name, mediaId);
     add(r.title_english ?? r.english_title, mediaId);
     add(r.title_romaji ?? r.romaji_title, mediaId);
+
+    // Best-effort nested extraction (GDPR exports vary across versions).
+    const seen = new Set();
+    const walk = (obj, depth) => {
+      if (!obj || depth > 3) return;
+      if (typeof obj === "string") return;
+      if (Array.isArray(obj)) {
+        for (const v of obj) walk(v, depth + 1);
+        return;
+      }
+      if (typeof obj !== "object") return;
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "string") {
+          const keyLooksTitle = /(title|name|romaji|english|native)/i.test(k);
+          const raw = v.trim();
+          if (!raw || raw.length < 2 || raw.length > 200) continue;
+          if (!keyLooksTitle && depth > 1) continue;
+          const dedupeKey = `${mediaId}::${raw.toLowerCase()}`;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+          add(raw, mediaId);
+        } else if (v && typeof v === "object") {
+          walk(v, depth + 1);
+        }
+      }
+    };
+    walk(r, 0);
   }
   return { index: idx, records, titleById };
 }
 
-function resolveFromGdprTitles(inputTitle) {
+function rankGdprTitleCandidates(inputTitle) {
   if (!localExistingTitleIndex || !localExistingTitleRecords.length) return null;
   const inputNorm = normForMatch(inputTitle);
   if (!inputNorm) return null;
-  const exactIds = localExistingTitleIndex.get(inputNorm);
-  if (exactIds && exactIds.size === 1) {
-    const mediaId = Array.from(exactIds)[0];
-    return { mediaId, title: localMediaTitleById.get(mediaId) || inputTitle, confidence: "exact" };
-  }
-
   const inputTokens = tokens(inputTitle);
   const jaccard = (aTokens, bTokens) => {
     const A = new Set(aTokens);
@@ -559,7 +580,29 @@ function resolveFromGdprTitles(inputTitle) {
       const score = Math.max(dice * 0.62 + jac * 0.38, jac * 0.5 + dice * 0.5) + prefixBonus(inputTokens, r.tokens);
       return { mediaId: r.mediaId, title: r.title, score };
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 240);
+
+  // Keep best title per mediaId so candidates are distinct anime, not duplicate aliases.
+  const bestByMedia = new Map();
+  for (const s of scored) {
+    const prev = bestByMedia.get(s.mediaId);
+    if (!prev || s.score > prev.score) bestByMedia.set(s.mediaId, s);
+  }
+  return Array.from(bestByMedia.values()).sort((a, b) => b.score - a.score);
+}
+
+function resolveFromGdprTitles(inputTitle) {
+  if (!localExistingTitleIndex || !localExistingTitleRecords.length) return null;
+  const inputNorm = normForMatch(inputTitle);
+  if (!inputNorm) return null;
+  const exactIds = localExistingTitleIndex.get(inputNorm);
+  if (exactIds && exactIds.size === 1) {
+    const mediaId = Array.from(exactIds)[0];
+    return { mediaId, title: localMediaTitleById.get(mediaId) || inputTitle, confidence: "exact" };
+  }
+
+  const scored = rankGdprTitleCandidates(inputTitle) || [];
 
   const best = scored[0];
   const second = scored[1];
@@ -1028,16 +1071,30 @@ async function runPreview() {
       return;
     }
     if (localExistingByMediaId && getGdprLocalOnly()) {
+      const localOptions = (rankGdprTitleCandidates(normalizedTitle) || []).slice(0, 8);
+      const localCandidates = localOptions
+        .filter((x) => x.score >= 0.62)
+        .map((x) => ({
+          id: x.mediaId,
+          title: { romaji: x.title },
+          seasonYear: undefined,
+          format: undefined,
+          isAdult: undefined,
+          synonyms: [],
+          siteUrl: undefined,
+        }));
       rows[i] = {
         rawTitle,
         normalizedTitle,
-        status: "unmatched",
-        candidates: [],
+        status: localCandidates.length ? "ambiguous" : "unmatched",
+        candidates: localCandidates,
         selectedMediaId: null,
         episodeNumbers: parsed[i].episodeNumbers,
         existsInAniList: false,
         existingEntry: null,
-        reason: "Not found in GDPR cache (local-only mode: AniList search skipped).",
+        reason: localCandidates.length
+          ? "Local-only mode: pick the best GDPR candidate (AniList search skipped)."
+          : "Not found in GDPR cache (local-only mode: AniList search skipped).",
       };
       done++;
       bumpProgress(done, total, rawTitle);
