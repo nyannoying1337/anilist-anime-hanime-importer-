@@ -106,6 +106,10 @@ let saw429Recently = false;
 let localExistingByMediaId = null;
 /** @type {Map<string, Set<number>>|null} */
 let localExistingTitleIndex = null;
+/** @type {{mediaId:number,title:string,norm:string,tokens:string[]}[]} */
+let localExistingTitleRecords = [];
+/** @type {Map<number, string>} */
+let localMediaTitleById = new Map();
 
 init();
 
@@ -223,9 +227,14 @@ function init() {
       const text = await file.text();
       const json = JSON.parse(text);
       localExistingByMediaId = await parseAniListGdprFile(json);
-      localExistingTitleIndex = buildGdprTitleIndex(json);
+      const titleData = buildGdprTitleIndex(json);
+      localExistingTitleIndex = titleData.index;
+      localExistingTitleRecords = titleData.records;
+      localMediaTitleById = titleData.titleById;
       refreshGdprStatus();
-      log(`Loaded GDPR export (${localExistingByMediaId.size} entries, ${localExistingTitleIndex?.size || 0} title keys).`);
+      log(
+        `Loaded GDPR export (${localExistingByMediaId.size} entries, ${localExistingTitleIndex?.size || 0} title keys, ${localExistingTitleRecords.length} title records).`
+      );
       // Re-apply offline existing markers if a preview is already present.
       if (previewRows?.length) {
         await markExistingRows();
@@ -245,6 +254,8 @@ function init() {
     } catch (e) {
       localExistingByMediaId = null;
       localExistingTitleIndex = null;
+      localExistingTitleRecords = [];
+      localMediaTitleById = new Map();
       refreshGdprStatus();
       log(`Failed to load GDPR export: ${String(e?.message || e)}`);
     } finally {
@@ -256,6 +267,8 @@ function init() {
   el.gdprClearBtn?.addEventListener("click", async () => {
     localExistingByMediaId = null;
     localExistingTitleIndex = null;
+    localExistingTitleRecords = [];
+    localMediaTitleById = new Map();
     refreshGdprStatus();
     cachedExistingMediaIds = new Set();
     for (const r of previewRows || []) {
@@ -465,12 +478,20 @@ function buildGdprTitleIndex(json) {
   const rows = Array.isArray(json?.lists) ? json.lists : [];
   /** @type {Map<string, Set<number>>} */
   const idx = new Map();
+  /** @type {{mediaId:number,title:string,norm:string,tokens:string[]}[]} */
+  const records = [];
+  /** @type {Map<number, string>} */
+  const titleById = new Map();
   const add = (title, mediaId) => {
-    const key = normForMatch(title);
+    const raw = String(title || "").trim();
+    if (!raw) return;
+    const key = normForMatch(raw);
     if (!key) return;
     const set = idx.get(key) ?? new Set();
     set.add(mediaId);
     idx.set(key, set);
+    records.push({ mediaId, title: raw, norm: key, tokens: tokens(raw) });
+    if (!titleById.has(mediaId)) titleById.set(mediaId, raw);
   };
   for (const r of rows) {
     if (!r || typeof r !== "object") continue;
@@ -480,7 +501,57 @@ function buildGdprTitleIndex(json) {
     add(r.title_english ?? r.english_title, mediaId);
     add(r.title_romaji ?? r.romaji_title, mediaId);
   }
-  return idx;
+  return { index: idx, records, titleById };
+}
+
+function resolveFromGdprTitles(inputTitle) {
+  if (!localExistingTitleIndex || !localExistingTitleRecords.length) return null;
+  const inputNorm = normForMatch(inputTitle);
+  if (!inputNorm) return null;
+  const exactIds = localExistingTitleIndex.get(inputNorm);
+  if (exactIds && exactIds.size === 1) {
+    const mediaId = Array.from(exactIds)[0];
+    return { mediaId, title: localMediaTitleById.get(mediaId) || inputTitle, confidence: "exact" };
+  }
+
+  const inputTokens = tokens(inputTitle);
+  const jaccard = (aTokens, bTokens) => {
+    const A = new Set(aTokens);
+    const B = new Set(bTokens);
+    if (!A.size || !B.size) return 0;
+    let inter = 0;
+    for (const t of A) if (B.has(t)) inter++;
+    const union = A.size + B.size - inter;
+    return union ? inter / union : 0;
+  };
+  const prefixBonus = (aTokens, bTokens) => {
+    const n = Math.min(aTokens.length, bTokens.length, 4);
+    if (!n) return 0;
+    for (let i = 0; i < n; i++) {
+      if (aTokens[i] !== bTokens[i]) return 0;
+    }
+    return 0.03;
+  };
+
+  const scored = localExistingTitleRecords
+    .map((r) => {
+      const jac = jaccard(inputTokens, r.tokens);
+      const dice = Math.max(
+        similarity(inputNorm, r.norm),
+        similarity(inputNorm.replace(/\s+/g, ""), r.norm.replace(/\s+/g, ""))
+      );
+      const score = Math.max(dice * 0.62 + jac * 0.38, jac * 0.5 + dice * 0.5) + prefixBonus(inputTokens, r.tokens);
+      return { mediaId: r.mediaId, title: r.title, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  const second = scored[1];
+  if (!best) return null;
+  if (best.score >= 0.98 || (best.score >= 0.94 && (!second || best.score - second.score >= 0.06))) {
+    return { mediaId: best.mediaId, title: best.title, confidence: "fuzzy" };
+  }
+  return null;
 }
 
 function getHideExisting() {
@@ -912,20 +983,23 @@ async function runPreview() {
 
   const processOne = async (i) => {
     const { rawTitle, normalizedTitle } = parsed[i];
-    const localKey = normForMatch(normalizedTitle);
-    const localIds = localExistingTitleIndex?.get(localKey) ? Array.from(localExistingTitleIndex.get(localKey)) : [];
-    if (localIds.length === 1) {
-      const mediaId = Number(localIds[0]);
+    const localResolved = resolveFromGdprTitles(normalizedTitle);
+    if (localResolved?.mediaId) {
+      const mediaId = Number(localResolved.mediaId);
+      const localTitle = String(localResolved.title || normalizedTitle);
       rows[i] = {
         rawTitle,
         normalizedTitle,
         status: "matched",
-        candidates: [{ id: mediaId, title: { romaji: normalizedTitle }, seasonYear: undefined, format: undefined, isAdult: undefined, synonyms: [], siteUrl: undefined }],
+        candidates: [{ id: mediaId, title: { romaji: localTitle }, seasonYear: undefined, format: undefined, isAdult: undefined, synonyms: [], siteUrl: undefined }],
         selectedMediaId: mediaId,
         episodeNumbers: parsed[i].episodeNumbers,
         existsInAniList: true,
         existingEntry: localExistingByMediaId?.get(mediaId) || null,
-        reason: "Matched from GDPR cache (local title index).",
+        reason:
+          localResolved.confidence === "exact"
+            ? "Matched from GDPR cache (exact local title)."
+            : "Matched from GDPR cache (high-confidence local title).",
       };
       done++;
       bumpProgress(done, total, rawTitle);
