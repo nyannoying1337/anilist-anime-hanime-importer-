@@ -3,7 +3,6 @@
 Local, paste-based importer for AniList:
 
 - Paste raw anime titles (one per line)
-- Fetch from Hanime.tv playlists
 - Preview AniList matches (flag ambiguous/unmatched)
 - Sign in with AniList
 - Import to your AniList list (creates/updates entries)
@@ -11,37 +10,14 @@ Local, paste-based importer for AniList:
 ### Setup (AniList)
 
 1. Go to AniList Developer settings and **create a new client app**.
-2. Set the **redirect URL** to `http://localhost:5173/` (the React dev server URL).
+2. Set the **redirect URL** to whichever URL you will use to open this tool, for example:
+   - `http://localhost:5173/` (recommended if you serve it locally), or
+   - `http://127.0.0.1:5173/`
 3. Copy your **Client ID**.
 
+Important: for the **implicit** OAuth flow AniList redirects to the URL configured in your AniList app settings (this tool does not send a `redirect_uri` query param).
+
 ### Run locally
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Start the Python backend server:
-   ```bash
-   python server.py
-   ```
-   This runs on http://localhost:8000/
-
-3. In another terminal, start the React front-end:
-   ```bash
-   npm run dev
-   ```
-   This runs on http://localhost:5173/
-
-4. Open http://localhost:5173/ in your browser.
-
-### Features
-
-- **Modern React UI** with animations and responsive design
-- **AniList OAuth** authentication
-- **Hanime.tv integration** for fetching playlists
-- **Real-time preview** of AniList matches
-- **Batch import** to your AniList list
 
 AniList’s GraphQL endpoint does **not** allow browser CORS, so you need a tiny local server that also proxies `/graphql`.
 

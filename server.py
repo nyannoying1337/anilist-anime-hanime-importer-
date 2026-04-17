@@ -72,7 +72,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_OPTIONS(self):
-        if self.path in ("/graphql", "/hanime/playlist", "/hanime/login", "/hanime/fetch", "/preview"):
+        if self.path in ("/graphql", "/hanime/playlist", "/hanime/login"):
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
@@ -92,10 +92,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._handle_hanime_playlist()
         if path_only == "/hanime/login":
             return self._handle_hanime_login()
-        if path_only == "/hanime/fetch":
-            return self._handle_hanime_fetch()
-        if path_only == "/preview":
-            return self._handle_preview()
         if path_only != "/graphql":
             return self._send_json(404, {"error": "Not Found", "path": self.path, "pathOnly": path_only})
             return
@@ -225,119 +221,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             return self._send_json(502, {"error": str(e)})
 
-    def _handle_hanime_fetch(self):
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        body = self.rfile.read(length) if length else b""
-        try:
-            req_json = json.loads(body.decode("utf-8") if body else "{}")
-        except Exception:
-            return self._send_json(400, {"error": "Invalid JSON"})
-
-        url = (req_json.get("url") or "").strip()
-        session_token = (req_json.get("sessionToken") or "").strip()
-        email = (req_json.get("email") or "").strip()
-        password = (req_json.get("password") or "").strip()
-
-        if not url:
-            return self._send_json(400, {"error": "url is required"})
-
-        if not session_token and not (email and password):
-            return self._send_json(400, {"error": "sessionToken or email+password required"})
-
-        try:
-            if not session_token and email and password:
-                session_token = hanime_login(email, password)
-                if not session_token:
-                    return self._send_json(502, {"error": "Login failed"})
-
-            titles, total_hint, _ = fetch_hanime_playlist_titles(url, session_token)
-            return self._send_json(200, {"titles": titles, "totalHint": total_hint})
-        except Exception as e:
-            return self._send_json(502, {"error": str(e)})
-
-    def _handle_preview(self):
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        body = self.rfile.read(length) if length else b""
-        try:
-            req_json = json.loads(body.decode("utf-8") if body else "{}")
-        except Exception:
-            return self._send_json(400, {"error": "Invalid JSON"})
-
-        titles = req_json.get("titles", [])
-        access_token = req_json.get("accessToken", "")
-
-        if not titles or not access_token:
-            return self._send_json(400, {"error": "titles and accessToken are required"})
-
-        try:
-            results = []
-            for title in titles:
-                # Search AniList for the title
-                search_results = self._search_anilist(title.strip(), access_token)
-                if search_results:
-                    # Take the first match
-                    anime = search_results[0]
-                    results.append({
-                        "title": title,
-                        "anilistTitle": anime.get("title", {}).get("romaji", anime.get("title", {}).get("english", title)),
-                        "anilistId": anime.get("id"),
-                        "status": "COMPLETED",  # Default status
-                        "matched": True
-                    })
-                else:
-                    results.append({
-                        "title": title,
-                        "status": "COMPLETED",
-                        "matched": False
-                    })
-            return self._send_json(200, {"results": results})
-        except Exception as e:
-            return self._send_json(502, {"error": str(e)})
-
-    def _search_anilist(self, query, access_token):
-        """Search AniList for anime by title"""
-        graphql_query = """
-        query ($search: String) {
-          Page(page: 1, perPage: 5) {
-            media(search: $search, type: ANIME) {
-              id
-              title {
-                romaji
-                english
-              }
-              status
-            }
-          }
-        }
-        """
-        
-        payload = {
-            "query": graphql_query,
-            "variables": {"search": query}
-        }
-        
-        req = urllib.request.Request(
-            "https://graphql.anilist.co",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {access_token}",
-                "User-Agent": DEFAULT_UA
-            },
-            method="POST"
-        )
-        
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data.get("data", {}).get("Page", {}).get("media", [])
-        except Exception as e:
-            print(f"Search failed for '{query}': {e}")
-            return []
-
 
 def main():
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(os.environ.get("PORT", "5173"))
     server = http.server.ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"Serving on http://localhost:{port}/ (with /graphql proxy)")
     server.serve_forever()
