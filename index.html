@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AniList Paste Import</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
-    <link rel="stylesheet" href="./src/styles.css?v=20260417-3" />
+    <link rel="stylesheet" href="./src/styles.css?v=20260417-4" />
   </head>
   <body>
     <header class="topBar">
@@ -43,40 +43,62 @@
     </div>
 
     <main class="workspace">
-      <section class="controlPanel" aria-label="Main actions">
-        <div class="controlIntro">
-          <h2>1) Open Source</h2>
-          <p>Paste your messy list from the website, then run preview.</p>
-        </div>
-        <div class="controlActions">
-          <button id="sourceOpenBtn" class="btn btnSecondary" type="button">Open Source</button>
-          <button id="previewBtn" class="btn btnPrimary" type="button">Run Preview</button>
-        </div>
-        <div class="controlDivider"></div>
-        <div class="controlIntro">
-          <h2>2) Import</h2>
-          <p>Sign in, choose default status, then import matched entries.</p>
-        </div>
-        <div class="controlActions">
-          <label class="topSelect">
-            <span class="topSelectLabel">Default status</span>
-            <select id="defaultStatus" class="select">
-              <option value="PLANNING">Planning</option>
-              <option value="CURRENT">Watching</option>
-              <option value="COMPLETED" selected>Completed</option>
-              <option value="PAUSED">Paused</option>
-              <option value="DROPPED">Dropped</option>
-              <option value="REPEATING">Repeating</option>
-            </select>
-          </label>
-          <button id="authBtn" class="btn btnSecondary" type="button">Sign in</button>
-          <button id="importBtn" class="btn btnPrimary" type="button" disabled>Import</button>
-        </div>
-      </section>
+      <section class="fromZeroLayout">
+        <aside class="leftRail">
+          <div class="card">
+            <div class="cardTitle">Step 1 — Source</div>
+            <div class="cardText">Open source and paste your exported list.</div>
+            <div class="cardActions">
+              <button id="sourceOpenBtn" class="btn btnSecondary" type="button">Open Source</button>
+              <button id="previewBtn" class="btn btnPrimary" type="button">Run Preview</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cardTitle">Step 2 — Import</div>
+            <div class="cardText">Sign in, pick status, then import matched rows.</div>
+            <label class="topSelect" style="margin-top: 8px;">
+              <span class="topSelectLabel">Default status</span>
+              <select id="defaultStatus" class="select">
+                <option value="PLANNING">Planning</option>
+                <option value="CURRENT">Watching</option>
+                <option value="COMPLETED" selected>Completed</option>
+                <option value="PAUSED">Paused</option>
+                <option value="DROPPED">Dropped</option>
+                <option value="REPEATING">Repeating</option>
+              </select>
+            </label>
+            <div class="cardActions" style="margin-top: 8px;">
+              <button id="authBtn" class="btn btnSecondary" type="button">Sign in</button>
+              <button id="importBtn" class="btn btnPrimary" type="button" disabled>Import</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cardTitle">Filters</div>
+            <div class="filterGroup" style="border:0; margin:0; padding:0; flex-wrap:wrap;">
+              <label class="inlineToggle">
+                <input id="hideExistingCheckbox" type="checkbox" />
+                <span>Hide already on AniList</span>
+              </label>
+              <label class="inlineToggle">
+                <input id="filterMatched" type="checkbox" />
+                <span>Matched</span>
+              </label>
+              <label class="inlineToggle">
+                <input id="filterAmbiguous" type="checkbox" />
+                <span>Ambiguous</span>
+              </label>
+              <label class="inlineToggle">
+                <input id="filterUnmatched" type="checkbox" />
+                <span>Unmatched</span>
+              </label>
+            </div>
+          </div>
+        </aside>
 
-      <div class="workspaceHeader">
-        <div class="sectionTitle">Preview results</div>
-        <div class="workspaceHeaderRight">
+        <section class="rightStage">
+          <div class="workspaceHeader">
+            <div class="sectionTitle">Preview</div>
+            <div class="workspaceHeaderRight">
           <div id="previewPager" class="previewPager" aria-live="polite">
             <button id="previewPrevBtn" class="btn btnSecondary" type="button">Prev</button>
             <span id="previewPageLabel" class="previewPageLabel">Rows 0–0 of 0</span>
@@ -90,29 +112,12 @@
               </select>
             </label>
           </div>
-          <label class="inlineToggle">
-            <input id="hideExistingCheckbox" type="checkbox" />
-            <span>Hide already on AniList</span>
-          </label>
-          <div class="filterGroup">
-            <label class="inlineToggle">
-              <input id="filterMatched" type="checkbox" />
-              <span>Matched</span>
-            </label>
-            <label class="inlineToggle">
-              <input id="filterAmbiguous" type="checkbox" />
-              <span>Ambiguous</span>
-            </label>
-            <label class="inlineToggle">
-              <input id="filterUnmatched" type="checkbox" />
-              <span>Unmatched</span>
-            </label>
+            <div id="previewSummary" class="summary"></div>
           </div>
-          <div id="previewSummary" class="summary"></div>
         </div>
-      </div>
-
-      <div id="previewTableWrap" class="tableMain"></div>
+          <div id="previewTableWrap" class="tableMain"></div>
+        </section>
+      </section>
     </main>
 
     <dialog id="sourceDialog" class="modalSheet">
@@ -270,6 +275,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./src/app.js?v=20260417-3"></script>
+    <script type="module" src="./src/app.js?v=20260417-4"></script>
   </body>
 </html>
