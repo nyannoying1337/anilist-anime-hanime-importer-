@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   filterAmbiguous: "anilistPasteImport.preview.filter.ambiguous",
   filterUnmatched: "anilistPasteImport.preview.filter.unmatched",
   gdprLocalOnly: "anilistPasteImport.gdpr.localOnly",
+  aliasMap: "anilistPasteImport.alias.map.v1",
   draftTitles: "anilistPasteImport.draft.titles",
   previewCache: "anilistPasteImport.preview.cache.v2",
 };
@@ -77,6 +78,8 @@ const el = {
   gdprClearBtn: document.getElementById("gdprClearBtn"),
   gdprStatus: document.getElementById("gdprStatus"),
   gdprLocalOnlyCheckbox: document.getElementById("gdprLocalOnlyCheckbox"),
+  aliasMemoryStatus: document.getElementById("aliasMemoryStatus"),
+  aliasMemoryClearBtn: document.getElementById("aliasMemoryClearBtn"),
   busyDialog: document.getElementById("busyDialog"),
   runBanner: document.getElementById("runBanner"),
   runBannerText: document.getElementById("runBannerText"),
@@ -112,6 +115,8 @@ let localExistingTitleIndex = null;
 let localExistingTitleRecords = [];
 /** @type {Map<number, string>} */
 let localMediaTitleById = new Map();
+/** @type {Map<string, {mediaId:number,title?:string}>} */
+let aliasByNormalizedTitle = new Map();
 
 init();
 
@@ -126,6 +131,7 @@ function setProgressState(state) {
 
 function init() {
   hydrateSettings();
+  loadAliasMemory();
   maybeConsumeOAuthTokenFromUrl();
   refreshAuthUi();
 
@@ -216,6 +222,13 @@ function init() {
     el.gdprStatus.textContent = localExistingByMediaId ? `Loaded ${n} entry/entries.` : "Not loaded.";
   };
   refreshGdprStatus();
+  refreshAliasMemoryUi();
+  el.aliasMemoryClearBtn?.addEventListener("click", () => {
+    aliasByNormalizedTitle = new Map();
+    saveAliasMemory();
+    refreshAliasMemoryUi();
+    log("Cleared local alias memory.");
+  });
   if (el.gdprLocalOnlyCheckbox) {
     el.gdprLocalOnlyCheckbox.checked = getGdprLocalOnly();
     el.gdprLocalOnlyCheckbox.addEventListener("change", () => {
@@ -451,6 +464,48 @@ function init() {
       refreshImportUi();
     }
   });
+}
+
+function loadAliasMemory() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.aliasMap);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object") return;
+    const next = new Map();
+    for (const [k, v] of Object.entries(obj)) {
+      const key = normForMatch(k);
+      const mediaId = Number(v?.mediaId ?? v);
+      if (!key || !Number.isFinite(mediaId)) continue;
+      next.set(key, { mediaId, title: typeof v?.title === "string" ? v.title : undefined });
+    }
+    aliasByNormalizedTitle = next;
+  } catch {
+    aliasByNormalizedTitle = new Map();
+  }
+}
+
+function saveAliasMemory() {
+  try {
+    const out = {};
+    for (const [k, v] of aliasByNormalizedTitle.entries()) {
+      out[k] = { mediaId: v.mediaId, title: v.title || null };
+    }
+    localStorage.setItem(STORAGE_KEYS.aliasMap, JSON.stringify(out));
+  } catch {}
+}
+
+function refreshAliasMemoryUi() {
+  if (!el.aliasMemoryStatus) return;
+  el.aliasMemoryStatus.textContent = `${aliasByNormalizedTitle.size} learned mapping(s).`;
+}
+
+function rememberAlias(inputTitle, mediaId, mediaTitle) {
+  const key = normForMatch(inputTitle);
+  if (!key || !Number.isFinite(Number(mediaId))) return;
+  aliasByNormalizedTitle.set(key, { mediaId: Number(mediaId), title: mediaTitle ? String(mediaTitle) : undefined });
+  saveAliasMemory();
+  refreshAliasMemoryUi();
 }
 
 let _isRunning = false;
@@ -1047,6 +1102,32 @@ async function runPreview() {
 
   const processOne = async (i) => {
     const { rawTitle, normalizedTitle } = parsed[i];
+    const aliasHit = aliasByNormalizedTitle.get(normForMatch(normalizedTitle));
+    if (aliasHit?.mediaId) {
+      rows[i] = {
+        rawTitle,
+        normalizedTitle,
+        status: "matched",
+        candidates: [{
+          id: aliasHit.mediaId,
+          title: { romaji: aliasHit.title || normalizedTitle },
+          seasonYear: undefined,
+          format: undefined,
+          isAdult: undefined,
+          synonyms: [],
+          siteUrl: undefined,
+        }],
+        selectedMediaId: aliasHit.mediaId,
+        episodeNumbers: parsed[i].episodeNumbers,
+        existsInAniList: Boolean(localExistingByMediaId?.get(aliasHit.mediaId)),
+        existingEntry: localExistingByMediaId?.get(aliasHit.mediaId) || null,
+        reason: "Matched from learned local alias memory.",
+      };
+      done++;
+      bumpProgress(done, total, rawTitle);
+      maybeRender(false);
+      return;
+    }
     const localResolved = resolveFromGdprTitles(normalizedTitle);
     if (localResolved?.mediaId) {
       const mediaId = Number(localResolved.mediaId);
@@ -1591,7 +1672,12 @@ function renderMatchPicker(row, idx) {
   const choose = (mediaId) => {
     previewRows[idx].selectedMediaId = mediaId;
     previewRows[idx].status = mediaId ? "matched" : (previewRows[idx].candidates.length ? "ambiguous" : "unmatched");
-    if (mediaId) previewRows[idx].reason = "Selected manually.";
+    if (mediaId) {
+      previewRows[idx].reason = "Selected manually.";
+      const picked = previewRows[idx].candidates.find((c) => c.id === mediaId) || null;
+      const pickedTitle = picked?.title?.english || picked?.title?.romaji || picked?.title?.native || null;
+      rememberAlias(previewRows[idx].normalizedTitle || previewRows[idx].rawTitle || "", mediaId, pickedTitle);
+    }
     closePanel();
     renderPreviewTable();
     renderSummary();
@@ -1694,6 +1780,11 @@ function renderMatchPicker(row, idx) {
       previewRows[idx].selectedMediaId = resolved.selectedMediaId;
       previewRows[idx].status = resolved.status;
       previewRows[idx].reason = resolved.reason || "Searched manually.";
+      if (resolved.selectedMediaId) {
+        const picked = previewRows[idx].candidates.find((c) => c.id === resolved.selectedMediaId) || null;
+        const pickedTitle = picked?.title?.english || picked?.title?.romaji || picked?.title?.native || null;
+        rememberAlias(previewRows[idx].normalizedTitle || previewRows[idx].rawTitle || q, resolved.selectedMediaId, pickedTitle);
+      }
       // Re-render the full table so year/format/summary updates.
       renderPreviewTable();
       renderSummary();
