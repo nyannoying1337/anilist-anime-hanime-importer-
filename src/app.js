@@ -29,6 +29,7 @@ const ANILIST = {
 const el = {
   settingsBtn: document.getElementById("settingsBtn"),
   sourceBtn: document.getElementById("sourceBtn"),
+  sourceOpenBtn: document.getElementById("sourceOpenBtn"),
   logBtn: document.getElementById("logBtn"),
   authBtn: document.getElementById("authBtn"),
   previewBtn: document.getElementById("previewBtn"),
@@ -312,6 +313,7 @@ function init() {
   });
 
   el.sourceBtn?.addEventListener("click", () => el.sourceDialog?.showModal?.());
+  el.sourceOpenBtn?.addEventListener("click", () => el.sourceDialog?.showModal?.());
   el.logBtn?.addEventListener("click", () => el.logDialog?.showModal?.());
 
   // Auto-cleanup pasted exports (e.g. tabular lists from other sites/apps).

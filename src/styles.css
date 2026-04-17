@@ -97,6 +97,44 @@ code{ color:#d7defa; }
   flex-direction:column;
   gap: 12px;
 }
+.workflowCard{
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0,0,0,.18);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+.workflowStep{
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,.02);
+}
+.workflowNum{
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(106,166,255,.5);
+  background: rgba(106,166,255,.15);
+  display:grid;
+  place-items:center;
+  font-size: 12px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+.workflowBody{ min-width: 0; flex: 1; }
+.workflowTitle{ font-weight: 800; }
+.workflowText{ font-size: 13px; color: var(--muted); }
+.workflowActions{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .quickStart{
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -561,6 +599,7 @@ thead th{
 @media (max-width: 980px){
   .topBar{ position: static; flex-direction: column; align-items: stretch; }
   .workspace{ height: auto; }
+  .workflowStep{ flex-wrap: wrap; align-items: flex-start; }
   .quickStartGrid{ grid-template-columns: 1fr; }
   .tableCard{ min-height: 320px; }
 }

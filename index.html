@@ -27,24 +27,9 @@
       </div>
 
       <div class="topBarRight">
-        <button id="sourceBtn" class="btn btnSecondary" type="button">Source</button>
         <button id="settingsBtn" class="btn btnSecondary" type="button">Settings</button>
+        <button id="sourceBtn" class="btn btnSecondary" type="button">Source</button>
         <button id="logBtn" class="btn btnSecondary" type="button">Log</button>
-        <div class="divider"></div>
-        <label class="topSelect">
-          <span class="topSelectLabel">Default status</span>
-          <select id="defaultStatus" class="select">
-            <option value="PLANNING">Planning</option>
-            <option value="CURRENT">Watching</option>
-            <option value="COMPLETED" selected>Completed</option>
-            <option value="PAUSED">Paused</option>
-            <option value="DROPPED">Dropped</option>
-            <option value="REPEATING">Repeating</option>
-          </select>
-        </label>
-        <button id="previewBtn" class="btn btnPrimary" type="button">Preview</button>
-        <button id="importBtn" class="btn btnSecondary" type="button" disabled>Import</button>
-        <button id="authBtn" class="btn btnSecondary" type="button">Sign in</button>
       </div>
     </header>
 
@@ -58,6 +43,47 @@
     </div>
 
     <main class="workspace">
+      <section class="workflowCard" aria-label="Import workflow">
+        <div class="workflowStep">
+          <div class="workflowNum">1</div>
+          <div class="workflowBody">
+            <div class="workflowTitle">Set source</div>
+            <div class="workflowText">Open source and paste your list (or fetch from Hanime).</div>
+          </div>
+          <button id="sourceOpenBtn" class="btn btnSecondary" type="button">Open Source</button>
+        </div>
+        <div class="workflowStep">
+          <div class="workflowNum">2</div>
+          <div class="workflowBody">
+            <div class="workflowTitle">Preview matches</div>
+            <div class="workflowText">Run preview to clean + match titles.</div>
+          </div>
+          <button id="previewBtn" class="btn btnPrimary" type="button">Run Preview</button>
+        </div>
+        <div class="workflowStep">
+          <div class="workflowNum">3</div>
+          <div class="workflowBody">
+            <div class="workflowTitle">Import to AniList</div>
+            <div class="workflowText">Sign in, choose default status, then import matched rows.</div>
+          </div>
+          <div class="workflowActions">
+            <label class="topSelect">
+              <span class="topSelectLabel">Default status</span>
+              <select id="defaultStatus" class="select">
+                <option value="PLANNING">Planning</option>
+                <option value="CURRENT">Watching</option>
+                <option value="COMPLETED" selected>Completed</option>
+                <option value="PAUSED">Paused</option>
+                <option value="DROPPED">Dropped</option>
+                <option value="REPEATING">Repeating</option>
+              </select>
+            </label>
+            <button id="authBtn" class="btn btnSecondary" type="button">Sign in</button>
+            <button id="importBtn" class="btn btnPrimary" type="button" disabled>Import</button>
+          </div>
+        </div>
+      </section>
+
       <section class="quickStart" aria-label="Quick start">
         <div class="quickStartTitle">Quick start</div>
         <div class="quickStartGrid">
