@@ -22,6 +22,7 @@
   --pico-card-background-color: rgba(255,255,255,.03);
 }
 
+.hidden { display: none !important; }
 *{ box-sizing:border-box; }
 html,body{ height:100%; }
 body{
@@ -479,6 +480,33 @@ table{
 }
 thead th{
   background: rgba(0,0,0,.22);
+}
+
+.loadMoreBtn {
+  display: block;
+  width: fit-content;
+  margin: 12px auto;
+}
+
+/* Loading spinner for async buttons */
+@keyframes btnSpin {
+  to { transform: rotate(360deg); }
+}
+.btn.loading {
+  pointer-events: none;
+  opacity: 0.72;
+}
+.btn.loading::after {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-left: 7px;
+  border: 2px solid rgba(255,255,255,.25);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: btnSpin 0.65s linear infinite;
+  vertical-align: middle;
 }
 
 @media (max-width: 980px){

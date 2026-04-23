@@ -15,12 +15,12 @@
       </div>
 
       <div class="topBarCenter">
-        <div id="progressWrap" class="progressWrap" style="display:none;">
+        <div id="progressWrap" class="progressWrap hidden">
           <div class="progressTop">
             <div id="progressLabel" class="progressLabel"></div>
             <div id="progressMeta" class="progressMeta"></div>
           </div>
-          <div class="progressBar">
+          <div class="progressBar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Operation progress">
             <div id="progressBarFill" class="progressBarFill" style="width:0%;"></div>
           </div>
         </div>
@@ -42,13 +42,13 @@
             <option value="REPEATING">Repeating</option>
           </select>
         </label>
-        <button id="previewBtn" class="btn btnPrimary" type="button">Preview</button>
-        <button id="importBtn" class="btn btnSecondary" type="button" disabled>Import</button>
+        <button id="previewBtn" class="btn btnPrimary" type="button" aria-label="Preview title matches against AniList">Preview</button>
+        <button id="importBtn" class="btn btnSecondary" type="button" disabled aria-label="Import matched titles to AniList">Import</button>
         <button id="authBtn" class="btn btnSecondary" type="button">Sign in</button>
       </div>
     </header>
 
-    <div id="runBanner" class="runBanner" style="display:none;">
+    <div id="runBanner" class="runBanner hidden" role="status" aria-live="polite">
       <div class="runBannerInner">
         <div class="runBannerTitle">Working…</div>
         <div id="runBannerText" class="runBannerText">Preview/import is running. Don’t close or refresh this page.</div>
@@ -86,10 +86,10 @@
       <div id="previewTableWrap" class="tableMain"></div>
     </main>
 
-    <dialog id="sourceDialog" class="modalSheet">
+    <dialog id="sourceDialog" class="modalSheet" aria-labelledby="sourceDialogTitle">
       <form method="dialog" class="modalInner">
         <div class="modalHeader">
-          <div class="modalTitle">Source</div>
+          <div id="sourceDialogTitle" class="modalTitle">Source</div>
           <button class="btn btnSecondary" value="cancel">Close</button>
         </div>
 
@@ -127,10 +127,10 @@
       </form>
     </dialog>
 
-    <dialog id="settingsDialog" class="modalSheet">
+    <dialog id="settingsDialog" class="modalSheet" aria-labelledby="settingsDialogTitle">
       <form method="dialog" class="modalInner">
         <div class="modalHeader">
-          <div class="modalTitle">Settings</div>
+          <div id="settingsDialogTitle" class="modalTitle">Settings</div>
           <button class="btn btnSecondary" value="cancel">Close</button>
         </div>
 
@@ -200,10 +200,10 @@
       </form>
     </dialog>
 
-    <dialog id="logDialog" class="modalSheet">
+    <dialog id="logDialog" class="modalSheet" aria-labelledby="logDialogTitle">
       <form method="dialog" class="modalInner">
         <div class="modalHeader">
-          <div class="modalTitle">Log</div>
+          <div id="logDialogTitle" class="modalTitle">Log</div>
           <div class="row" style="align-items:center;">
             <button id="copyLogBtn" class="btn btnSecondary" type="button">Copy</button>
             <button class="btn btnSecondary" value="cancel">Close</button>
@@ -215,10 +215,10 @@
       </form>
     </dialog>
 
-    <dialog id="busyDialog" class="modalSheet">
+    <dialog id="busyDialog" class="modalSheet" aria-labelledby="busyDialogTitle">
       <form method="dialog" class="modalInner">
         <div class="modalHeader">
-          <div class="modalTitle">Working…</div>
+          <div id="busyDialogTitle" class="modalTitle">Working…</div>
           <button class="btn btnSecondary" value="cancel">Hide</button>
         </div>
         <div class="modalBody">
