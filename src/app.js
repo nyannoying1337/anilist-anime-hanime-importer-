@@ -98,6 +98,10 @@ let saw429Recently = false;
 /** @type {Map<number, {status?:string, progress?:number}>|null} */
 let localExistingByMediaId = null;
 
+// Pagination state for the preview table.
+const TABLE_PAGE_SIZE = 80;
+let _tablePageCount = 1;
+
 init();
 
 let currentProgress = null;
@@ -118,7 +122,7 @@ function init() {
 
   // Persistent "work running" banner
   el.runBannerHideBtn?.addEventListener("click", () => {
-    if (el.runBanner) el.runBanner.style.display = "none";
+    if (el.runBanner) el.runBanner.classList.add("hidden");
   });
 
   // Restore draft titles + last *finished* preview (no resume of in-progress work).
@@ -240,7 +244,7 @@ function init() {
   });
 
   el.copyLogBtn?.addEventListener("click", async () => {
-    const text = el.log?.textContent || "";
+    const text = Array.from(el.log?.childNodes || []).map((n) => n.textContent).join("\n");
     try {
       await navigator.clipboard.writeText(text);
       log("Copied log to clipboard.");
@@ -330,11 +334,13 @@ function init() {
   el.previewBtn.addEventListener("click", async () => {
     try {
       el.previewBtn.disabled = true;
+      el.previewBtn.classList.add("loading");
       el.importBtn.disabled = true;
       await runPreview();
       refreshImportUi();
     } finally {
       el.previewBtn.disabled = false;
+      el.previewBtn.classList.remove("loading");
     }
   });
 
@@ -348,6 +354,7 @@ function init() {
     localStorage.setItem(STORAGE_KEYS.hanimeLastPlaylistUrl, playlistUrl);
     try {
       el.hanimeFetchBtn.disabled = true;
+      el.hanimeFetchBtn.classList.add("loading");
       setProgress({ label: "Fetching from Hanime…", current: 0, total: null, meta: playlistUrl });
       const titles = await fetchHanimePlaylistTitles(playlistUrl);
       if (!titles.length) {
@@ -364,23 +371,38 @@ function init() {
     } finally {
       clearProgress();
       el.hanimeFetchBtn.disabled = false;
+      el.hanimeFetchBtn.classList.remove("loading");
     }
   });
 
   el.importBtn.addEventListener("click", async () => {
     try {
       el.importBtn.disabled = true;
+      el.importBtn.classList.add("loading");
       await runImport();
     } finally {
+      el.importBtn.classList.remove("loading");
       refreshImportUi();
     }
   });
+
+  // Single delegated listener to close any open match picker when clicking outside.
+  // Replaces the per-picker document listener that was added on every renderMatchPicker() call.
+  document.addEventListener("pointerdown", (e) => {
+    document.querySelectorAll(".matchPickerPanel.open").forEach((panel) => {
+      const wrap = panel.closest(".matchPicker");
+      if (wrap && !wrap.contains(e.target)) {
+        panel.classList.remove("open");
+        panel.setAttribute("aria-hidden", "true");
+      }
+    });
+  }, { capture: true });
 }
 
 let _isRunning = false;
 function setRunningState(running, text) {
   _isRunning = Boolean(running);
-  if (el.runBanner) el.runBanner.style.display = running ? "block" : "none";
+  if (el.runBanner) el.runBanner.classList.toggle("hidden", !running);
   if (el.runBannerText && text) el.runBannerText.textContent = text;
 
   // Warn on refresh/close while running. Browsers show a generic message.
@@ -456,15 +478,15 @@ function hydrateSettings() {
 
 function log(msg) {
   const ts = new Date().toLocaleTimeString();
-  const line = `[${ts}] ${msg}\n`;
-  // Append (easier to read in chronological order). Trim to avoid unbounded growth.
-  const next = (el.log.textContent || "") + line;
-  const maxChars = 120_000;
-  el.log.textContent = next.length > maxChars ? next.slice(next.length - maxChars) : next;
-  // Keep view pinned to latest when Log dialog is open.
-  try {
-    el.log.scrollTop = el.log.scrollHeight;
-  } catch {}
+  const line = document.createElement("div");
+  line.textContent = `[${ts}] ${msg}`;
+  el.log.appendChild(line);
+  // Trim oldest entries to prevent unbounded DOM growth.
+  const maxLines = 400;
+  while (el.log.childNodes.length > maxLines) {
+    el.log.removeChild(el.log.firstChild);
+  }
+  try { el.log.scrollTop = el.log.scrollHeight; } catch {}
 }
 
 function persistFinishedPreview() {
@@ -497,14 +519,17 @@ function persistFinishedPreview() {
 function setProgress({ label, current, total, meta }) {
   currentProgress = { label, current, total, meta };
   if (!el.progressWrap) return;
-  el.progressWrap.style.display = "block";
+  el.progressWrap.classList.remove("hidden");
   setProgressState(_progressWaitCount > 0 ? "wait" : "ok");
   if (el.progressLabel) el.progressLabel.textContent = label || "";
   const pct =
     typeof total === "number" && total > 0 && typeof current === "number"
       ? Math.max(0, Math.min(100, Math.round((current / total) * 100)))
       : null;
-  if (el.progressBarFill) el.progressBarFill.style.width = pct == null ? "18%" : `${pct}%`;
+  if (el.progressBarFill) {
+    el.progressBarFill.style.width = pct == null ? "18%" : `${pct}%`;
+    el.progressBarFill.closest("[role=progressbar]")?.setAttribute("aria-valuenow", String(pct ?? 0));
+  }
   if (el.progressMeta) {
     const left = typeof current === "number" && typeof total === "number" ? `${current}/${total}` : "";
     el.progressMeta.textContent = [left, meta].filter(Boolean).join(" • ");
@@ -519,7 +544,7 @@ function bumpProgress(current, total, meta) {
 function clearProgress() {
   currentProgress = null;
   if (!el.progressWrap) return;
-  el.progressWrap.style.display = "none";
+  el.progressWrap.classList.add("hidden");
   el.progressWrap.classList.remove("stateOk", "stateWait", "stateErr");
   if (el.progressBarFill) el.progressBarFill.style.width = "0%";
   if (el.progressLabel) el.progressLabel.textContent = "";
@@ -649,10 +674,9 @@ function extractTitleFromMessyLine(line) {
       const second = cols[1];
       // Status column examples: "Abgeschlossen", "Airing", "Nicht erschienen (Pre-Airing)"
       const looksLikeStatus =
-        /\b(abgeschlossen|airing|nicht erschienen|pre-?airing|paused|dropped|planning|completed|watching)\b/i.test(
+        /\b(abgeschlossen|airing|nicht erschienen|pre-?airing|paused|dropped|planning|completed|watching|repeating)\b/i.test(
           first
-        ) ||
-        first.length <= 32; // status strings are typically short
+        );
       if (looksLikeStatus && second) return second;
     }
   }
@@ -1039,13 +1063,15 @@ function normForMatch(s) {
   cleaned = cleaned.replace(/\bthe\s+animation\b/gi, "");
   // Japanese romanized particle equivalence (common AniList spelling differences)
   cleaned = cleaned.replace(/\bwo\b/gi, "o");
+  cleaned = cleaned.replace(/\bwa\b/gi, "ha");
   cleaned = cleaned.replace(/\s+/g, " ").trim();
   return cleaned;
 }
 
 function tokens(s) {
   // Keep this conservative: mostly connectors/particles.
-  const stop = new Set(["the", "a", "an", "and", "to", "animation", "wa", "wo", "o"]);
+  // "wo" and "wa" are already normalized away by normForMatch() before tokens() runs.
+  const stop = new Set(["the", "a", "an", "and", "to", "animation", "o", "ha"]);
   const base = normForMatch(s)
     .split(" ")
     .map((t) => t.trim())
@@ -1136,7 +1162,32 @@ function renderSummary() {
     (existingHidden ? ` • ${existingHidden} already in AniList` : "");
 }
 
+function buildTableRow({ row, idx }) {
+  const tr = document.createElement("tr");
+  const pill = renderStatusPill(row.status, row.existsInAniList);
+  const matchCell = renderMatchCell(row, idx);
+  const selected = row.selectedMediaId
+    ? row.candidates.find((c) => c.id === row.selectedMediaId) ?? null
+    : null;
+  tr.appendChild(td(pill));
+  tr.appendChild(td(row.rawTitle));
+  tr.appendChild(matchCell);
+  tr.appendChild(td(selected?.seasonYear ? String(selected.seasonYear) : "—"));
+  tr.appendChild(td(selected?.format ?? "—"));
+  tr.appendChild(td(row.reason ?? "—"));
+  return tr;
+}
+
 function renderPreviewTable() {
+  _tablePageCount = 1;
+  _renderTablePage();
+}
+
+function _renderTablePage() {
+  const allRows = getFilteredPreviewRows();
+  const visible = allRows.slice(0, _tablePageCount * TABLE_PAGE_SIZE);
+  const remaining = allRows.length - visible.length;
+
   const table = document.createElement("table");
   table.innerHTML = `
     <thead>
@@ -1152,28 +1203,26 @@ function renderPreviewTable() {
     <tbody></tbody>
   `;
   const tbody = table.querySelector("tbody");
+  for (const entry of visible) {
+    tbody.appendChild(buildTableRow(entry));
+  }
 
-  const rows = getFilteredPreviewRows();
-  rows.forEach(({ row, idx }) => {
-    const tr = document.createElement("tr");
-    const pill = renderStatusPill(row.status, row.existsInAniList);
-    const matchCell = renderMatchCell(row, idx);
-
-    const selected = row.selectedMediaId
-      ? row.candidates.find((c) => c.id === row.selectedMediaId) ?? null
-      : null;
-
-    tr.appendChild(td(pill));
-    tr.appendChild(td(escapeHtml(row.rawTitle)));
-    tr.appendChild(matchCell);
-    tr.appendChild(td(selected?.seasonYear ? String(selected.seasonYear) : "—"));
-    tr.appendChild(td(selected?.format ?? "—"));
-    tr.appendChild(td(escapeHtml(row.reason ?? "—")));
-    tbody.appendChild(tr);
-  });
+  const frag = document.createDocumentFragment();
+  frag.appendChild(table);
+  if (remaining > 0) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btnSecondary loadMoreBtn";
+    btn.textContent = `Load ${Math.min(TABLE_PAGE_SIZE, remaining)} more (${remaining} remaining)`;
+    btn.addEventListener("click", () => {
+      _tablePageCount++;
+      _renderTablePage();
+    });
+    frag.appendChild(btn);
+  }
 
   el.previewTableWrap.innerHTML = "";
-  el.previewTableWrap.appendChild(table);
+  el.previewTableWrap.appendChild(frag);
 }
 
 function renderStatusPill(status, existsInAniList) {
@@ -1181,6 +1230,7 @@ function renderStatusPill(status, existsInAniList) {
   wrap.className = "pill";
   const dot = document.createElement("span");
   dot.className = "dot";
+  dot.setAttribute("aria-hidden", "true");
   const label = document.createElement("span");
   if (status === "matched") {
     dot.classList.add("dotOk");
@@ -1237,6 +1287,8 @@ function renderMatchPicker(row, idx) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "matchPickerBtn";
+  button.setAttribute("aria-haspopup", "listbox");
+  button.setAttribute("aria-expanded", "false");
 
   const selected = row.selectedMediaId
     ? row.candidates.find((c) => c.id === row.selectedMediaId) ?? null
@@ -1274,10 +1326,12 @@ function renderMatchPicker(row, idx) {
   const closePanel = () => {
     panel.classList.remove("open");
     panel.setAttribute("aria-hidden", "true");
+    button.setAttribute("aria-expanded", "false");
   };
   const openPanel = () => {
     panel.classList.add("open");
     panel.setAttribute("aria-hidden", "false");
+    button.setAttribute("aria-expanded", "true");
     search.value = "";
     renderList("");
     queueMicrotask(() => search.focus());
@@ -1291,7 +1345,7 @@ function renderMatchPicker(row, idx) {
     renderPreviewTable();
     renderSummary();
     refreshImportUi();
-    persistPreviewCache();
+    persistFinishedPreview();
   };
 
   let liveCandidates = [];
@@ -1337,7 +1391,6 @@ function renderMatchPicker(row, idx) {
     else openPanel();
   });
 
-  search.addEventListener("input", () => renderList(search.value));
   search.addEventListener("input", () => {
     const q = (search.value || "").trim();
     searchBtn.disabled = q.length < 2;
@@ -1393,7 +1446,7 @@ function renderMatchPicker(row, idx) {
       renderPreviewTable();
       renderSummary();
       refreshImportUi();
-      persistPreviewCache();
+      persistFinishedPreview();
     } catch (e) {
       log(`Manual AniList search failed: ${String(e?.message || e)}`);
     } finally {
@@ -1401,16 +1454,6 @@ function renderMatchPicker(row, idx) {
       searchBtn.disabled = (search.value || "").trim().length < 2;
     }
   });
-
-  // Click-away close (scoped to this render instance; re-render recreates handlers).
-  const onDocPointer = (e) => {
-    if (!panel.classList.contains("open")) return;
-    const t = e.target;
-    if (!(t instanceof Node)) return;
-    if (wrap.contains(t)) return;
-    closePanel();
-  };
-  document.addEventListener("pointerdown", onDocPointer, { capture: true });
 
   panel.appendChild(search);
   panel.appendChild(list);
@@ -1430,7 +1473,7 @@ function formatMediaLabel(m) {
 function td(child) {
   const d = document.createElement("td");
   if (child instanceof Node) d.appendChild(child);
-  else d.innerHTML = String(child);
+  else d.textContent = String(child);
   return d;
 }
 
@@ -1571,7 +1614,7 @@ function resolveCandidates(inputTitle, candidates) {
   })();
 
   if (!anyOverlap && best && best.score < 0.72) {
-    return { status: "ambiguous", selectedMediaId: null, reason: "Low-confidence results (check spelling/suffix)." };
+    return { status: "unmatched", selectedMediaId: null, reason: "Low-confidence results (check spelling/suffix)." };
   }
 
   const suggestion = best?.bestTitle ? ` Top suggestion: ${best.bestTitle}.` : "";
@@ -1647,15 +1690,15 @@ async function runImport() {
 
   let created = 0;
   let updated = 0;
-  let ok = 0;
   let failed = 0;
   for (let i = 0; i < toImport.length; i++) {
     const item = toImport[i];
     try {
       bumpProgress(i, toImport.length, item.title);
       await saveMediaListEntry(item.mediaId, item.status);
-      ok++;
-      // SaveMediaListEntry is create-or-update; we don't need a pre-flight lookup (saves 1 API call per entry).
+      // Use existsInAniList (set during preview) to distinguish create vs update.
+      const wasExisting = previewRows.find((r) => r.selectedMediaId === item.mediaId)?.existsInAniList;
+      if (wasExisting) updated++; else created++;
       log(`Imported: ${item.title}`);
     } catch (e) {
       failed++;
@@ -1787,8 +1830,7 @@ async function gql(query, variables, { auth }) {
   if (res.status === 429) {
     saw429Recently = true;
     // Rate limited. Respect Retry-After when present, otherwise exponential backoff with jitter.
-    let attempt = 0;
-    while (attempt < 5 && res.status === 429) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       const retryAfterHeader = res.headers?.get?.("Retry-After") || null;
       const retryAfterMs = (() => {
         const s = retryAfterHeader ? Number(retryAfterHeader) : NaN;
@@ -1798,11 +1840,10 @@ async function gql(query, variables, { auth }) {
       const backoff = Math.min(60_000, 1500 * 2 ** attempt);
       const jitter = Math.floor(Math.random() * 400);
       await sleep((retryAfterMs ?? backoff) + jitter);
-      attempt++;
-
-      // Retry the whole gql flow (endpoint selection + proxy fallback)
-      return gql(query, variables, { auth });
+      res = await doFetch(usedUrl);
+      if (res.status !== 429) break;
     }
+    // If still 429 after all retries, fall through to error handling below.
   }
 
   const rawText = await res.text().catch(() => "");
