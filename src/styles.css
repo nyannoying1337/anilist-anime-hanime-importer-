@@ -256,7 +256,7 @@ a { color: var(--accent); }
   z-index: 30;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(11,22,34,.94);
+  background: var(--run-banner-bg, rgba(11,22,34,.94));
   backdrop-filter: blur(12px);
 }
 .runBannerInner { display: flex; align-items: center; gap: 12px; }
@@ -326,7 +326,7 @@ thead th {
   border-bottom: 1px solid var(--border);
   background: rgba(0,0,0,.20);
   position: sticky;
-  top: 58px;
+  top: 0;
   z-index: 2;
 }
 tbody td {
@@ -589,4 +589,6 @@ dialog.modalSheet[open] { animation: modalIn 150ms ease-out; }
   .topBar { height: auto; padding: 10px 12px; flex-wrap: wrap; }
   .workspace { height: auto; overflow: visible; }
   .tableMain { min-height: 320px; }
+  /* At narrow widths the whole page scrolls, so headers need topBar clearance */
+  thead th { top: 58px; }
 }

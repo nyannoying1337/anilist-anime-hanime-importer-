@@ -95,6 +95,21 @@ const searchCache = new Map();
 // Observability for adaptive pacing (set inside gql()).
 let saw429Recently = false;
 
+// Set to the error message if a fatal AniList API error aborts the current run.
+let fatalApiError = null;
+
+function showApiErrorBanner(msg) {
+  // Reuse the runBanner for a persistent, hard-to-miss error notice.
+  if (el.runBannerTitle) el.runBannerTitle.textContent = "AniList error";
+  if (el.runBannerText) el.runBannerText.textContent = msg;
+  if (el.runBanner) {
+    el.runBanner.classList.remove("hidden");
+    el.runBanner.style.setProperty("--run-banner-bg", "rgba(232,93,117,.18)");
+    el.runBanner.style.setProperty("border-bottom-color", "rgba(232,93,117,.4)");
+  }
+  setProgressState("err");
+}
+
 /** @type {Map<number, {status?:string, progress?:number}>|null} */
 let localExistingByMediaId = null;
 
@@ -402,7 +417,15 @@ function init() {
 let _isRunning = false;
 function setRunningState(running, text) {
   _isRunning = Boolean(running);
-  if (el.runBanner) el.runBanner.classList.toggle("hidden", !running);
+  if (el.runBanner) {
+    el.runBanner.classList.toggle("hidden", !running);
+    // Reset error styling when starting a new run.
+    if (running) {
+      el.runBanner.style.removeProperty("--run-banner-bg");
+      el.runBanner.style.removeProperty("border-bottom-color");
+    }
+  }
+  if (running && el.runBannerTitle) el.runBannerTitle.textContent = "Working…";
   if (el.runBannerText && text) el.runBannerText.textContent = text;
 
   // Warn on refresh/close while running. Browsers show a generic message.
@@ -817,6 +840,7 @@ async function runPreview() {
   el.previewTableWrap.innerHTML = "";
   cachedExistingMediaIds = new Set();
   saw429Recently = false;
+  fatalApiError = null;
 
   /** @type {PreviewRow[]} */
   const rows = new Array(parsed.length);
@@ -891,8 +915,14 @@ async function runPreview() {
   };
 
   while (next < total || active > 0) {
+    if (fatalApiError) {
+      // Drain in-flight tasks then stop — no point hammering a downed API.
+      await Promise.all(Array.from(inFlight));
+      break;
+    }
     maybeAdjustFor429();
     while (next < total && active < limit) {
+      if (fatalApiError) break;
       const i = next++;
       active++;
       const p = (async () => {
@@ -909,7 +939,7 @@ async function runPreview() {
       await Promise.race(Array.from(inFlight));
     }
   }
-  bumpProgress(total, total, "Done");
+  bumpProgress(done, total, fatalApiError ? "Stopped" : "Done");
 
   previewRows = rows;
   // After we have selected media ids, check which ones already exist in the user's AniList.
@@ -1061,6 +1091,19 @@ function buildSearchVariants(input) {
   const colon = s.split(":")[0];
   if (colon && colon !== s) push(colon);
 
+  // Ordinal season suffix: "Ajin 2nd Season" → "Ajin" and "Ajin 2"
+  const ordSeason = s.match(/^(.*?)\s+(\d+)(?:st|nd|rd|th)\s+season\s*$/i);
+  if (ordSeason?.[1]) {
+    push(ordSeason[1].trim());
+    push(`${ordSeason[1].trim()} ${ordSeason[2]}`);
+  }
+  // "Title Season 2" → "Title" and "Title 2"
+  const seasonN = s.match(/^(.*?)\s+season\s*(\d+)\s*$/i);
+  if (seasonN?.[1]) {
+    push(seasonN[1].trim());
+    push(`${seasonN[1].trim()} ${seasonN[2]}`);
+  }
+
   // Looser punctuation version
   push(s.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " "));
 
@@ -1084,6 +1127,8 @@ function normForMatch(s) {
   // Drop common "branding" prefixes and noisy suffix phrases in adult titles.
   cleaned = cleaned.replace(/^(?:love me|i love)\s+/i, "");
   cleaned = cleaned.replace(/\bthe\s+animation\b/gi, "");
+  // Ordinal numbers → bare digits so "2nd Season" matches "2nd Season" romaji
+  cleaned = cleaned.replace(/\b(\d+)(?:st|nd|rd|th)\b/g, '$1');
   // Japanese romanized particle equivalence (common AniList spelling differences)
   cleaned = cleaned.replace(/\bwo\b/gi, "o");
   cleaned = cleaned.replace(/\bwa\b/gi, "ha");
@@ -1528,6 +1573,11 @@ function resolveCandidates(inputTitle, candidates) {
   const inputTokens = tokens(inputTitle);
   const inputYear = extractYearFromTitle(inputTitle);
 
+  // Pre-compute input-subtitle-stripped forms for the "fansub subtitle" pass below.
+  const _inputColonIdx = inputTitle.indexOf(': ');
+  const inputStrippedNorm = _inputColonIdx > 0 ? normForMatch(inputTitle.slice(0, _inputColonIdx)) : null;
+  const inputStrippedTokens = _inputColonIdx > 0 ? tokens(inputTitle.slice(0, _inputColonIdx)) : null;
+
   // IDF-lite: tokens appearing in >60% of candidates get 0.6x weight in Jaccard.
   // This downweights generic tokens shared across many results (e.g. common words).
   const tokenFreq = new Map();
@@ -1591,11 +1641,12 @@ function resolveCandidates(inputTitle, candidates) {
       // Synonyms get a slight down-weight vs. primary titles
       const fieldMult = isSynonym.has(t) ? 0.9 : 1.0;
 
-      const s = fieldMult * Math.max(dice * 0.72 + effectiveJac * 0.28 + bonus, effectiveJac * 0.55 + dice * 0.45 + bonus);
+      // Cap at 0.99 so no blended score can tie with an exact match (score 1.0).
+      const s = Math.min(0.99, fieldMult * Math.max(dice * 0.72 + effectiveJac * 0.28 + bonus, effectiveJac * 0.55 + dice * 0.45 + bonus));
       if (s > best) { best = s; bestTitle = t; }
     }
 
-    // Subtitle-stripped pass: "AIKa R-16: VIRGIN MISSION" → try "AIKa R-16" separately
+    // Subtitle-stripped candidate pass: "AIKa R-16: VIRGIN MISSION" → try "AIKa R-16"
     for (const t of titleStrings) {
       const ci = t.indexOf(': ');
       if (ci <= 0) continue;
@@ -1620,8 +1671,37 @@ function resolveCandidates(inputTitle, candidates) {
         similarity(inputNorm.replace(/\s+/g, ''), strNorm.replace(/\s+/g, '')));
       const bonus2 = prefixBonus(inputTokens, strToks);
       const fm2 = (isSynonym.has(t) ? 0.9 : 1.0) * 0.95;
-      const s2 = fm2 * Math.max(dice2 * 0.72 + ej2 * 0.28 + bonus2, ej2 * 0.55 + dice2 * 0.45 + bonus2);
+      const s2 = Math.min(0.99, fm2 * Math.max(dice2 * 0.72 + ej2 * 0.28 + bonus2, ej2 * 0.55 + dice2 * 0.45 + bonus2));
       if (s2 > best) { best = s2; bestTitle = t; }
+    }
+
+    // Input subtitle-stripped pass: handles inputs like "Title: Fansub Subtitle" where
+    // the subtitle is not part of the AniList entry. Score candidates against the base input.
+    if (inputStrippedNorm && inputStrippedNorm !== inputNorm) {
+      for (const t of titleStrings) {
+        const tn = normForMatch(t);
+        if (!tn) continue;
+        if (tn === inputStrippedNorm) return { score: 0.88, bestTitle: t, exact: true };
+        const tToks = tokens(t);
+        const allToksI = new Set([...inputStrippedTokens, ...tToks]);
+        let interI = 0, unionWI = 0;
+        for (const tok of allToksI) {
+          const w = idfW(tok);
+          if (inputStrippedTokens.includes(tok) && tToks.includes(tok)) interI += w;
+          unionWI += w;
+        }
+        let inputWI = 0;
+        for (const tok of inputStrippedTokens) inputWI += idfW(tok);
+        const jacI = unionWI > 0 ? interI / unionWI : 0;
+        const covI = inputWI > 0 ? Math.min(1, interI / inputWI) : 0;
+        const ejI = Math.max(jacI, covI);
+        const diceI = Math.max(similarity(inputStrippedNorm, tn),
+          similarity(inputStrippedNorm.replace(/\s+/g, ''), tn.replace(/\s+/g, '')));
+        const bonusI = prefixBonus(inputStrippedTokens, tToks);
+        const fmI = (isSynonym.has(t) ? 0.9 : 1.0) * 0.88;
+        const sI = Math.min(0.87, fmI * Math.max(diceI * 0.72 + ejI * 0.28 + bonusI, ejI * 0.55 + diceI * 0.45 + bonusI));
+        if (sI > best) { best = sI; bestTitle = t; }
+      }
     }
 
     // Year scoring adjustment
@@ -1646,8 +1726,11 @@ function resolveCandidates(inputTitle, candidates) {
   const second = scored[1];
   const gap = second ? best.score - second.score : 1;
 
-  if (best?.exact) {
-    return { status: "matched", selectedMediaId: best.id, confidence: 1, isSolidMatch: true, reason: "Exact match (title/synonym)." };
+  // Scan all candidates for exact match — not just scored[0] — so a non-exact candidate
+  // that scores 0.99 can't bury a true exact match that happens to sort second.
+  const anyExact = scored.find((s) => s.exact);
+  if (anyExact) {
+    return { status: "matched", selectedMediaId: anyExact.id, confidence: 1, isSolidMatch: true, reason: "Exact match (title/synonym)." };
   }
 
   // Tier 1: high-confidence, clear leader
@@ -1929,11 +2012,16 @@ async function gql(query, variables, { auth }) {
     const msg =
       json?.errors?.[0]?.message ||
       (snippet ? `HTTP ${res.status}: ${snippet}` : `HTTP ${res.status}`);
+    fatalApiError = msg;
+    showApiErrorBanner(msg);
     throw new Error(msg);
   }
   if (json?.errors?.length) {
     setProgressState("err");
-    throw new Error(json.errors[0]?.message || "AniList error");
+    const msg = json.errors[0]?.message || "AniList error";
+    fatalApiError = msg;
+    showApiErrorBanner(msg);
+    throw new Error(msg);
   }
   if (!auth && !hasLocalProxy && usedUrl && usedUrl !== ANILIST.graphqlUrl) {
     log(`Using AniList endpoint: ${usedUrl}`);
