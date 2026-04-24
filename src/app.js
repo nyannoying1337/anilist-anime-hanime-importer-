@@ -102,22 +102,7 @@ let localExistingByMediaId = null;
 const TABLE_PAGE_SIZE = 80;
 let _tablePageCount = 1;
 
-// Catch any uncaught error and display it on the page so it's visible without DevTools.
-window.addEventListener("error", (e) => {
-  const b = document.createElement("div");
-  b.style.cssText = "position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:12px 16px;font:13px/1.5 monospace;z-index:99999;white-space:pre-wrap;word-break:break-all;";
-  b.textContent = "JS Error: " + e.message + "\n  " + e.filename + ":" + e.lineno + ":" + e.colno;
-  document.body.appendChild(b);
-});
-
-try {
-  init();
-} catch (e) {
-  const b = document.createElement("div");
-  b.style.cssText = "position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:12px 16px;font:13px/1.5 monospace;z-index:99999;white-space:pre-wrap;word-break:break-all;";
-  b.textContent = "Init failed: " + e.message + "\n" + (e.stack || "");
-  document.body.appendChild(b);
-}
+init();
 
 let currentProgress = null;
 let _progressWaitCount = 0;
@@ -1511,7 +1496,11 @@ function renderMatchPicker(row, idx) {
 function formatMediaLabel(m) {
   const t = m.title?.english || m.title?.romaji || m.title?.native || `ID ${m.id}`;
   const year = m.seasonYear ? ` (${m.seasonYear})` : "";
-  return `${t}${year}`;
+  const fmtMap = { TV: "TV", TV_SHORT: "TV Short", MOVIE: "Movie",
+                   SPECIAL: "Special", OVA: "OVA", ONA: "ONA", MUSIC: "Music" };
+  const fmt = m.format ? ` · ${fmtMap[m.format] ?? m.format}` : "";
+  const adult = m.isAdult ? " · 18+" : "";
+  return `${t}${year}${fmt}${adult}`;
 }
 
 function td(child) {
@@ -1587,6 +1576,13 @@ function resolveCandidates(inputTitle, candidates) {
       }
       const jac = unionW > 0 ? inter / unionW : 0;
 
+      // Coverage precision: when all input tokens appear in candidate, use input-normalised
+      // denominator so extra subtitle/qualifier words don't drag the score down.
+      let inputTotalW = 0;
+      for (const tok of inputTokens) inputTotalW += idfW(tok);
+      const coverage = inputTotalW > 0 ? Math.min(1, inter / inputTotalW) : 0;
+      const effectiveJac = Math.max(jac, coverage);
+
       const dice = Math.max(
         similarity(inputNorm, tn),
         similarity(inputNorm.replace(/\s+/g, ""), tn.replace(/\s+/g, ""))
@@ -1595,8 +1591,37 @@ function resolveCandidates(inputTitle, candidates) {
       // Synonyms get a slight down-weight vs. primary titles
       const fieldMult = isSynonym.has(t) ? 0.9 : 1.0;
 
-      const s = fieldMult * Math.max(dice * 0.72 + jac * 0.28 + bonus, jac * 0.55 + dice * 0.45 + bonus);
+      const s = fieldMult * Math.max(dice * 0.72 + effectiveJac * 0.28 + bonus, effectiveJac * 0.55 + dice * 0.45 + bonus);
       if (s > best) { best = s; bestTitle = t; }
+    }
+
+    // Subtitle-stripped pass: "AIKa R-16: VIRGIN MISSION" → try "AIKa R-16" separately
+    for (const t of titleStrings) {
+      const ci = t.indexOf(': ');
+      if (ci <= 0) continue;
+      const stripped = t.slice(0, ci).trim();
+      const strNorm = normForMatch(stripped);
+      if (!strNorm) continue;
+      if (strNorm === inputNorm) return { score: 0.95, bestTitle: t, exact: true };
+      const strToks = tokens(stripped);
+      const allToks2 = new Set([...inputTokens, ...strToks]);
+      let inter2 = 0, unionW2 = 0;
+      for (const tok of allToks2) {
+        const w = idfW(tok);
+        if (inputTokens.includes(tok) && strToks.includes(tok)) inter2 += w;
+        unionW2 += w;
+      }
+      let inputW2 = 0;
+      for (const tok of inputTokens) inputW2 += idfW(tok);
+      const jac2 = unionW2 > 0 ? inter2 / unionW2 : 0;
+      const cov2 = inputW2 > 0 ? Math.min(1, inter2 / inputW2) : 0;
+      const ej2 = Math.max(jac2, cov2);
+      const dice2 = Math.max(similarity(inputNorm, strNorm),
+        similarity(inputNorm.replace(/\s+/g, ''), strNorm.replace(/\s+/g, '')));
+      const bonus2 = prefixBonus(inputTokens, strToks);
+      const fm2 = (isSynonym.has(t) ? 0.9 : 1.0) * 0.95;
+      const s2 = fm2 * Math.max(dice2 * 0.72 + ej2 * 0.28 + bonus2, ej2 * 0.55 + dice2 * 0.45 + bonus2);
+      if (s2 > best) { best = s2; bestTitle = t; }
     }
 
     // Year scoring adjustment
