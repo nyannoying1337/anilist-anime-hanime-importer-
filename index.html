@@ -1,10 +1,9 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AniList Paste Import</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
@@ -27,12 +26,13 @@
       </div>
 
       <div class="topBarRight">
-        <button id="sourceBtn" class="btn btnSecondary" type="button">Source</button>
-        <button id="settingsBtn" class="btn btnSecondary" type="button">Settings</button>
-        <button id="logBtn" class="btn btnSecondary" type="button">Log</button>
-        <div class="divider"></div>
-        <label class="topSelect">
-          <span class="topSelectLabel">Default status</span>
+        <div class="topBarSecondary">
+          <button id="sourceBtn" class="btn btnGhost" type="button"><span class="btnLabel">Source</span></button>
+          <button id="settingsBtn" class="btn btnGhost" type="button"><span class="btnLabel">Settings</span></button>
+          <button id="logBtn" class="btn btnGhost" type="button"><span class="btnLabel">Log</span></button>
+        </div>
+        <label class="statusSelectWrap">
+          <span class="topSelectLabel">Status</span>
           <select id="defaultStatus" class="select">
             <option value="PLANNING">Planning</option>
             <option value="CURRENT">Watching</option>
@@ -51,7 +51,7 @@
     <div id="runBanner" class="runBanner hidden" role="status" aria-live="polite">
       <div class="runBannerInner">
         <div class="runBannerTitle">Working…</div>
-        <div id="runBannerText" class="runBannerText">Preview/import is running. Don’t close or refresh this page.</div>
+        <div id="runBannerText" class="runBannerText">Preview/import is running. Don't close or refresh this page.</div>
         <div class="spacer"></div>
         <button id="runBannerHideBtn" class="btn btnSecondary" type="button">Hide</button>
       </div>
@@ -112,15 +112,15 @@
               <div class="label">Playlist URL</div>
               <input id="hanimePlaylistUrlInput" class="input" placeholder="https://hanime.tv/playlists/liked-videos-…" />
             </label>
-            <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+            <label class="hanimeFillRow">
               <input id="hanimeFillOnlyCheckbox" type="checkbox" />
-              <span style="color: var(--muted); font-size: 13px;">Only fill (don’t auto-preview)</span>
+              <span class="hanimeFillLabel">Only fill (don't auto-preview)</span>
             </label>
-            <button id="hanimeFetchBtn" class="btn btnPrimary" type="button" style="margin-top:10px; width:100%;">Fetch from Hanime</button>
+            <button id="hanimeFetchBtn" class="btn btnPrimary hanimeFetchBtn" type="button">Fetch from Hanime</button>
             <div class="help">Requires Hanime sign-in or session token (Settings).</div>
           </div>
 
-          <div class="help" style="margin-top: 14px;">
+          <div class="help helpNote">
             Default status is set in the top bar.
           </div>
         </div>
@@ -150,22 +150,22 @@
               </div>
             </label>
 
-            <div class="row rowWrap" style="margin-top: 12px;">
-              <label class="field" style="min-width: 360px; flex: 1;">
+            <div class="row rowWrap settingsFieldRow">
+              <label class="field gdprFileField">
                 <div class="label">AniList GDPR export (optional)</div>
                 <input id="gdprFileInput" class="input" type="file" accept="application/json,.json" />
                 <div class="help">
-                  Load your AniList <code>gdpr_data.json</code> to mark “already on AniList” instantly (no network).
+                  Load your AniList <code>gdpr_data.json</code> to mark "already on AniList" instantly (no network).
                   This file is kept in memory only and is never uploaded anywhere.
                 </div>
               </label>
-              <div class="field" style="min-width: 240px;">
+              <div class="field gdprCacheField">
                 <div class="label">Existing list cache</div>
                 <div class="row">
                   <button id="gdprLoadBtn" class="btn btnSecondary" type="button">Load</button>
                   <button id="gdprClearBtn" class="btn btnDanger" type="button">Clear</button>
                 </div>
-                <div id="gdprStatus" class="help" style="margin-top: 8px;">Not loaded.</div>
+                <div id="gdprStatus" class="help gdprStatusHelp">Not loaded.</div>
               </div>
             </div>
           </div>
@@ -178,12 +178,12 @@
                 Paste either the raw token or a cookie string (e.g. <code>htv3session=...</code>). Stored locally in your browser and only sent to your local server.
               </div>
             </label>
-            <div class="row rowWrap" style="margin-top: 10px;">
-              <label class="field" style="min-width: 280px; flex: 1;">
+            <div class="row rowWrap hanimeBtnRow">
+              <label class="field hanimeCredField">
                 <div class="label">Hanime email</div>
                 <input id="hanimeEmailInput" class="input" placeholder="email@example.com" />
               </label>
-              <label class="field" style="min-width: 280px; flex: 1;">
+              <label class="field hanimeCredField">
                 <div class="label">Hanime password</div>
                 <input id="hanimePasswordInput" class="input" type="password" placeholder="••••••••" />
               </label>
@@ -191,7 +191,7 @@
             </div>
           </div>
 
-          <div class="row" style="margin-top: 12px;">
+          <div class="row settingsActionRow">
             <button id="clearTokenBtn" class="btn btnDanger" type="button">Sign out</button>
             <div class="spacer"></div>
             <button id="saveSettingsBtn" class="btn btnPrimary" type="button">Save</button>
@@ -204,7 +204,7 @@
       <form method="dialog" class="modalInner">
         <div class="modalHeader">
           <div id="logDialogTitle" class="modalTitle">Log</div>
-          <div class="row" style="align-items:center;">
+          <div class="row rowCenter">
             <button id="copyLogBtn" class="btn btnSecondary" type="button">Copy</button>
             <button class="btn btnSecondary" value="cancel">Close</button>
           </div>
@@ -222,7 +222,7 @@
           <button class="btn btnSecondary" value="cancel">Hide</button>
         </div>
         <div class="modalBody">
-          <div class="help" style="margin-top: 6px;">
+          <div class="help helpNote">
             Sit tight — this can take a bit on large lists due to AniList rate limits.
             You can watch progress in the top bar.
           </div>
@@ -230,7 +230,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./src/app.js?v=20260414-3"></script>
+    <script type="module" src="./src/app.js?v=20260424-1"></script>
   </body>
 </html>
-

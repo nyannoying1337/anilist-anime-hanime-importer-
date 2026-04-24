@@ -77,7 +77,7 @@ const el = {
 };
 
 /** @typedef {{id:number,title:{romaji?:string,english?:string,native?:string},seasonYear?:number,format?:string,isAdult?:boolean,synonyms?:string[],siteUrl?:string}} Media */
-/** @typedef {{rawTitle:string,normalizedTitle:string,status:'matched'|'ambiguous'|'unmatched',candidates:Media[],selectedMediaId:number|null,episodeNumbers?:number[],reason?:string,existsInAniList?:boolean,existingEntry?:{status?:string,progress?:number}|null}} PreviewRow */
+/** @typedef {{rawTitle:string,normalizedTitle:string,status:'matched'|'ambiguous'|'unmatched',candidates:Media[],selectedMediaId:number|null,episodeNumbers?:number[],reason?:string,confidence?:number,existsInAniList?:boolean,existingEntry?:{status?:string,progress?:number}|null}} PreviewRow */
 
 /** @type {PreviewRow[]} */
 let previewRows = [];
@@ -500,6 +500,7 @@ function persistFinishedPreview() {
       selectedMediaId: r.selectedMediaId ?? null,
       episodeNumbers: Array.isArray(r.episodeNumbers) ? r.episodeNumbers : undefined,
       reason: r.reason,
+      confidence: r.confidence ?? null,
       existsInAniList: Boolean(r.existsInAniList),
       existingEntry: r.existingEntry ?? null,
       candidates: Array.isArray(r.candidates)
@@ -862,9 +863,10 @@ async function runPreview() {
       episodeNumbers: parsed[i].episodeNumbers,
       existsInAniList: false,
       existingEntry: null,
+      confidence: resolved.confidence ?? null,
       reason:
-        (attempts > 1 ? `Searched as “${usedQuery}” (fallback ${attempts}). ` : "") +
-        (resolved.reason || ""),
+        (attempts > 1 ? `Searched as “${usedQuery}” (fallback ${attempts}). ` : “”) +
+        (resolved.reason || “”),
     };
     done++;
     bumpProgress(done, total, rawTitle);
@@ -1010,6 +1012,15 @@ async function fetchExistingEntriesByMediaIds(userId, mediaIds) {
   return out;
 }
 
+function getAllTitleStrings(c) {
+  return [
+    c.title?.romaji,
+    c.title?.english,
+    c.title?.native,
+    ...(Array.isArray(c.synonyms) ? c.synonyms : []),
+  ].filter(Boolean);
+}
+
 function buildSearchVariants(input) {
   const s = normalizeTitle(input);
   const variants = [];
@@ -1021,13 +1032,19 @@ function buildSearchVariants(input) {
 
   push(s);
 
+  // Year-stripped variants: "Title (2006)" → "Title", "Title 2006" → "Title"
+  const parenYear = s.match(/\s*\((?:19[6-9]\d|20[0-2]\d|2030)\)\s*$/);
+  if (parenYear) push(s.slice(0, parenYear.index).trim());
+  const bareYear = s.match(/\s+(?:19[6-9]\d|20[0-2]\d|2030)\s*$/);
+  if (bareYear) push(s.slice(0, bareYear.index).trim());
+
   // Common connector variants ("to" vs "and") seen in titles.
   if (/\bto\b/i.test(s)) push(s.replace(/\bto\b/gi, "and"));
   if (/\band\b/i.test(s)) push(s.replace(/\band\b/gi, "to"));
 
-  // Strip trailing "episode + studio" patterns (common from hanime playlist labels)
+  // Strip trailing "episode + studio" patterns (fixed: use \p{Lu} for Unicode uppercase)
   const mStudio = s.match(
-    /^(.*?)(?:\s+(?:EP|Ep|ep)\s*)?\s*\d+\s+([A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*){0,2})\s*$/
+    /^(.*?)(?:\s+(?:EP|Ep|ep)\s*)?\s*\d+\s+([\p{Lu}\p{Lt}][\w'.\-\p{L}]*(?:\s+[\p{Lu}\p{Lt}][\w'.\-\p{L}]*){0,2})\s*$/u
   );
   if (mStudio?.[1]) push(mStudio[1]);
 
@@ -1053,11 +1070,17 @@ function buildSearchVariants(input) {
 function normForMatch(s) {
   // Strong normalization for scoring (not for display)
   const v = normalizeTitle(String(s || "")).toLowerCase();
-  const noDiacritics = v.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  // Full-width ASCII \u2192 half-width (\uff41\u2192a, \uff11\u21921, U+FF01\u2013FF5E \u2192 U+0021\u2013007E)
+  let fw = v.replace(/[\uff01-\uff5e]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  fw = fw.replace(/\u3000/g, " "); // ideographic space
+  const noDiacritics = fw.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
   let cleaned = noDiacritics
     .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+  // Normalize common symbol words before particle rules
+  cleaned = cleaned.replace(/\s*&\s*/g, " and ");
+  cleaned = cleaned.replace(/\s*\+\s*/g, " plus ");
   // Drop common "branding" prefixes and noisy suffix phrases in adult titles.
   cleaned = cleaned.replace(/^(?:love me|i love)\s+/i, "");
   cleaned = cleaned.replace(/\bthe\s+animation\b/gi, "");
@@ -1066,6 +1089,11 @@ function normForMatch(s) {
   cleaned = cleaned.replace(/\bwa\b/gi, "ha");
   cleaned = cleaned.replace(/\s+/g, " ").trim();
   return cleaned;
+}
+
+function extractYearFromTitle(title) {
+  const m = String(title || "").match(/\b(19[6-9]\d|20[0-2]\d|2030)\b/);
+  return m ? Number(m[1]) : null;
 }
 
 function tokens(s) {
@@ -1089,23 +1117,20 @@ function tokens(s) {
 
 async function searchAnimeWithFallback(title) {
   const variants = buildSearchVariants(title);
-  let last = [];
+  let bestResult = null; // { candidates, usedQuery, attempts, bestScore }
   for (let i = 0; i < variants.length; i++) {
-    const q = variants[i];
-    const candidates = await searchAnime(q);
-    last = candidates;
+    const candidates = await searchAnime(variants[i]);
     if (!candidates?.length) continue;
-
-    // Use the scorer to decide whether we need to try another variant.
     const resolved = resolveCandidates(title, candidates);
-    const looksBad =
-      resolved.status === "ambiguous" &&
-      typeof resolved.reason === "string" &&
-      /low-confidence/i.test(resolved.reason);
-
-    if (!looksBad) return { candidates, usedQuery: q, attempts: i + 1 };
+    const score = resolved.confidence ?? 0;
+    if (!bestResult || score > bestResult.bestScore) {
+      bestResult = { candidates, usedQuery: variants[i], attempts: i + 1, bestScore: score };
+    }
+    if (resolved.isSolidMatch) return { candidates, usedQuery: variants[i], attempts: i + 1 };
   }
-  return { candidates: last || [], usedQuery: variants[0] || title, attempts: variants.length || 1 };
+  return bestResult
+    ? { candidates: bestResult.candidates, usedQuery: bestResult.usedQuery, attempts: bestResult.attempts }
+    : { candidates: [], usedQuery: variants[0] || title, attempts: variants.length || 1 };
 }
 
 function extractEpisodeSuffix(title) {
@@ -1118,7 +1143,10 @@ function extractEpisodeSuffix(title) {
     const m = s.match(re);
     if (m?.[1] && m?.[2]) {
       const n = Number(m[2]);
-      if (Number.isFinite(n) && n >= 0) return { baseTitle: normalizeTitle(m[1]), episodeNumber: n };
+      // Do not treat 4-digit years (1960–2030) as episode numbers.
+      if (Number.isFinite(n) && n >= 0 && !(n >= 1960 && n <= 2030)) {
+        return { baseTitle: normalizeTitle(m[1]), episodeNumber: n };
+      }
     }
   }
   return { baseTitle: s, episodeNumber: null };
@@ -1131,11 +1159,12 @@ function groupEpisodeLikeTitles(parsedTitles) {
     const { baseTitle, episodeNumber } = extractEpisodeSuffix(t.normalizedTitle);
     const key = normalizeTitle(baseTitle).toLowerCase();
     if (!key) continue;
-    const g =
-      groups.get(key) ??
-      { rawTitle: baseTitle, normalizedTitle: baseTitle, episodeNumbers: [] };
+    if (!groups.has(key)) {
+      // Preserve original rawTitle from the parsed input (not the episode-stripped baseTitle).
+      groups.set(key, { rawTitle: t.rawTitle, normalizedTitle: baseTitle, episodeNumbers: [] });
+    }
+    const g = groups.get(key);
     if (episodeNumber != null) g.episodeNumbers.push(episodeNumber);
-    groups.set(key, g);
   }
   return Array.from(groups.values()).map((g) => ({
     rawTitle: g.rawTitle,
@@ -1164,17 +1193,23 @@ function renderSummary() {
 
 function buildTableRow({ row, idx }) {
   const tr = document.createElement("tr");
+  tr.dataset.status = row.status;
+  if (row.existsInAniList) tr.dataset.existing = "1";
   const pill = renderStatusPill(row.status, row.existsInAniList);
   const matchCell = renderMatchCell(row, idx);
   const selected = row.selectedMediaId
     ? row.candidates.find((c) => c.id === row.selectedMediaId) ?? null
     : null;
+  const confidenceStr =
+    row.confidence != null && row.status !== "matched"
+      ? ` [${Math.round(row.confidence * 100)}%]`
+      : "";
   tr.appendChild(td(pill));
   tr.appendChild(td(row.rawTitle));
   tr.appendChild(matchCell);
   tr.appendChild(td(selected?.seasonYear ? String(selected.seasonYear) : "—"));
   tr.appendChild(td(selected?.format ?? "—"));
-  tr.appendChild(td(row.reason ?? "—"));
+  tr.appendChild(td((row.reason ?? "—") + confidenceStr));
   return tr;
 }
 
@@ -1197,7 +1232,7 @@ function _renderTablePage() {
         <th>Match</th>
         <th style="width: 120px;">Year</th>
         <th style="width: 160px;">Format</th>
-        <th style="width: 260px;">Notes</th>
+        <th style="width: 260px;">Notes / Score</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -1227,22 +1262,16 @@ function _renderTablePage() {
 
 function renderStatusPill(status, existsInAniList) {
   const wrap = document.createElement("div");
-  wrap.className = "pill";
-  const dot = document.createElement("span");
-  dot.className = "dot";
-  dot.setAttribute("aria-hidden", "true");
+  const cls =
+    status === "matched"
+      ? "pillMatched"
+      : status === "ambiguous"
+        ? "pillAmbiguous"
+        : "pillUnmatched";
+  wrap.className = `pill ${cls}`;
   const label = document.createElement("span");
-  if (status === "matched") {
-    dot.classList.add("dotOk");
-    label.textContent = "Matched";
-  } else if (status === "ambiguous") {
-    dot.classList.add("dotWarn");
-    label.textContent = "Ambiguous";
-  } else {
-    dot.classList.add("dotBad");
-    label.textContent = "Unmatched";
-  }
-  wrap.appendChild(dot);
+  label.textContent =
+    status === "matched" ? "Matched" : status === "ambiguous" ? "Ambiguous" : "Unmatched";
   wrap.appendChild(label);
   if (existsInAniList) {
     const tag = document.createElement("span");
@@ -1488,22 +1517,26 @@ function escapeHtml(s) {
 
 function resolveCandidates(inputTitle, candidates) {
   if (!candidates || candidates.length === 0) {
-    return { status: "unmatched", selectedMediaId: null, reason: "No search results." };
+    return { status: "unmatched", selectedMediaId: null, confidence: 0, isSolidMatch: false, reason: "No search results." };
   }
 
   const inputNorm = normForMatch(inputTitle);
   const inputTokens = tokens(inputTitle);
-  const inputTokenSet = new Set(inputTokens);
+  const inputYear = extractYearFromTitle(inputTitle);
 
-  const jaccard = (aTokens, bTokens) => {
-    const A = new Set(aTokens);
-    const B = new Set(bTokens);
-    if (A.size === 0 || B.size === 0) return 0;
-    let inter = 0;
-    for (const t of A) if (B.has(t)) inter++;
-    const union = A.size + B.size - inter;
-    return union ? inter / union : 0;
-  };
+  // IDF-lite: tokens appearing in >60% of candidates get 0.6x weight in Jaccard.
+  // This downweights generic tokens shared across many results (e.g. common words).
+  const tokenFreq = new Map();
+  for (const c of candidates) {
+    const seen = new Set();
+    for (const t of getAllTitleStrings(c)) {
+      for (const tok of tokens(t)) {
+        if (!seen.has(tok)) { seen.add(tok); tokenFreq.set(tok, (tokenFreq.get(tok) || 0) + 1); }
+      }
+    }
+  }
+  const N = candidates.length;
+  const idfW = (tok) => (tokenFreq.get(tok) || 0) / N > 0.6 ? 0.6 : 1.0;
 
   const prefixBonus = (aTokens, bTokens) => {
     if (!aTokens.length || !bTokens.length) return 0;
@@ -1511,16 +1544,12 @@ function resolveCandidates(inputTitle, candidates) {
     for (let i = 0; i < n; i++) {
       if (aTokens[i] !== bTokens[i]) return 0;
     }
-    return 0.04; // small bonus for shared prefix tokens
+    return 0.04;
   };
 
   const scoreCandidate = (c) => {
-    const titleStrings = [
-      c.title?.romaji,
-      c.title?.english,
-      c.title?.native,
-      ...(Array.isArray(c.synonyms) ? c.synonyms : []),
-    ].filter(Boolean);
+    const titleStrings = getAllTitleStrings(c);
+    const isSynonym = new Set(Array.isArray(c.synonyms) ? c.synonyms : []);
 
     let best = 0;
     let bestTitle = null;
@@ -1530,21 +1559,40 @@ function resolveCandidates(inputTitle, candidates) {
       if (tn === inputNorm) return { score: 1, bestTitle: t, exact: true };
 
       const tTokens = tokens(t);
-      const jac = jaccard(inputTokens, tTokens);
+
+      // IDF-weighted Jaccard
+      const allToks = new Set([...inputTokens, ...tTokens]);
+      let inter = 0, unionW = 0;
+      for (const tok of allToks) {
+        const w = idfW(tok);
+        const inA = inputTokens.includes(tok);
+        const inB = tTokens.includes(tok);
+        if (inA && inB) inter += w;
+        unionW += w;
+      }
+      const jac = unionW > 0 ? inter / unionW : 0;
+
       const dice = Math.max(
         similarity(inputNorm, tn),
         similarity(inputNorm.replace(/\s+/g, ""), tn.replace(/\s+/g, ""))
       );
       const bonus = prefixBonus(inputTokens, tTokens);
+      // Synonyms get a slight down-weight vs. primary titles
+      const fieldMult = isSynonym.has(t) ? 0.9 : 1.0;
 
-      // Weighted blend. Dice handles fuzz; Jaccard handles missing suffixes.
-      const s = Math.max(dice * 0.72 + jac * 0.28 + bonus, jac * 0.55 + dice * 0.45 + bonus);
-      if (s > best) {
-        best = s;
-        bestTitle = t;
-      }
+      const s = fieldMult * Math.max(dice * 0.72 + jac * 0.28 + bonus, jac * 0.55 + dice * 0.45 + bonus);
+      if (s > best) { best = s; bestTitle = t; }
     }
-    return { score: best, bestTitle, exact: false };
+
+    // Year scoring adjustment
+    let yearAdj = 0;
+    if (inputYear != null && c.seasonYear != null) {
+      const diff = Math.abs(inputYear - c.seasonYear);
+      if (diff <= 1) yearAdj = +0.12;
+      else if (diff >= 5) yearAdj = -0.04;
+    }
+
+    return { score: Math.min(1, Math.max(0, best + yearAdj)), bestTitle, exact: false };
   };
 
   const scored = candidates
@@ -1556,24 +1604,28 @@ function resolveCandidates(inputTitle, candidates) {
 
   const best = scored[0];
   const second = scored[1];
+  const gap = second ? best.score - second.score : 1;
 
   if (best?.exact) {
-    return { status: "matched", selectedMediaId: best.id, reason: "Exact match (title/synonym)." };
+    return { status: "matched", selectedMediaId: best.id, confidence: 1, isSolidMatch: true, reason: "Exact match (title/synonym)." };
   }
 
-  // High-confidence auto-select.
-  if (best && best.score >= 0.93 && (!second || best.score - second.score >= 0.06)) {
+  // Tier 1: high-confidence, clear leader
+  if (best && best.score >= 0.90 && gap >= 0.05) {
     const hint = best.bestTitle ? ` (${best.bestTitle})` : "";
-    return { status: "matched", selectedMediaId: best.id, reason: `High-confidence match${hint}.` };
+    return { status: "matched", selectedMediaId: best.id, confidence: best.score, isSolidMatch: true, reason: `High-confidence match${hint}.` };
   }
 
-  // Adult content: AniList often returns many close variants; if the top adult candidate
-  // clearly dominates, auto-pick to reduce manual confirmation.
+  // Tier 2: single candidate at moderate confidence
+  if (candidates.length === 1 && best && best.score >= 0.85) {
+    const hint = best.bestTitle ? ` (${best.bestTitle})` : "";
+    return { status: "matched", selectedMediaId: best.id, confidence: best.score, isSolidMatch: true, reason: `Single result auto-match${hint}.` };
+  }
+
+  // Tier 3: adult dominant match (keep existing guard logic)
   if (best && second) {
     const bestMedia = candidates.find((c) => c.id === best.id) || null;
-    const bestIsAdult = Boolean(bestMedia?.isAdult);
-    const gap = best.score - second.score;
-    if (bestIsAdult && best.score >= 0.9 && gap >= 0.1 && candidates.length <= 12) {
+    if (Boolean(bestMedia?.isAdult) && best.score >= 0.9 && gap >= 0.1 && candidates.length <= 12) {
       const bestTokens = tokens(best.bestTitle || (bestMedia?.title?.english || bestMedia?.title?.romaji || ""));
       const n = Math.min(inputTokens.length, bestTokens.length, 4);
       let prefixMatches = 0;
@@ -1581,44 +1633,21 @@ function resolveCandidates(inputTitle, candidates) {
         if (inputTokens[i] !== bestTokens[i]) break;
         prefixMatches++;
       }
-      // Require some shared prefix signal (longer titles benefit more; short titles stay manual).
       if (prefixMatches >= Math.min(2, n)) {
         const hint = best.bestTitle ? ` (${best.bestTitle})` : "";
-        return { status: "matched", selectedMediaId: best.id, reason: `Adult dominant match${hint}.` };
+        return { status: "matched", selectedMediaId: best.id, confidence: best.score, isSolidMatch: true, reason: `Adult dominant match${hint}.` };
       }
     }
   }
 
-  // If AniList only returned a single plausible candidate, auto-select at a lower bar.
-  // This avoids annoying manual confirmation for obvious one-result cases.
-  if (candidates.length === 1 && best && best.score >= 0.80) {
-    const hint = best.bestTitle ? ` (${best.bestTitle})` : "";
-    return { status: "matched", selectedMediaId: best.id, reason: `Single result auto-match${hint}.` };
+  // Tier 4: ambiguous (needs confirmation)
+  if (best && best.score >= 0.72) {
+    const suggestion = best.bestTitle ? ` Top suggestion: ${best.bestTitle}.` : "";
+    return { status: "ambiguous", selectedMediaId: null, confidence: best.score, isSolidMatch: false, reason: `Needs confirmation (not exact).${suggestion}` };
   }
 
-  // Low score: treat as ambiguous or unmatched based on any token overlap.
-  const anyOverlap = (() => {
-    for (const c of candidates) {
-      const titleStrings = [
-        c.title?.romaji,
-        c.title?.english,
-        c.title?.native,
-        ...(Array.isArray(c.synonyms) ? c.synonyms : []),
-      ].filter(Boolean);
-      for (const t of titleStrings) {
-        const ts = tokens(t);
-        for (const tok of ts) if (inputTokenSet.has(tok)) return true;
-      }
-    }
-    return false;
-  })();
-
-  if (!anyOverlap && best && best.score < 0.72) {
-    return { status: "unmatched", selectedMediaId: null, reason: "Low-confidence results (check spelling/suffix)." };
-  }
-
-  const suggestion = best?.bestTitle ? ` Top suggestion: ${best.bestTitle}.` : "";
-  return { status: "ambiguous", selectedMediaId: null, reason: `Needs confirmation (not exact).${suggestion}` };
+  // Tier 5: unmatched
+  return { status: "unmatched", selectedMediaId: null, confidence: best?.score ?? 0, isSolidMatch: false, reason: "Low-confidence results (check spelling/suffix)." };
 }
 
 function similarity(a, b) {
