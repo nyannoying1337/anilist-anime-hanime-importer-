@@ -256,7 +256,7 @@ a { color: var(--accent); }
   z-index: 30;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(11,22,34,.94);
+  background: var(--run-banner-bg, rgba(11,22,34,.94));
   backdrop-filter: blur(12px);
 }
 .runBannerInner { display: flex; align-items: center; gap: 12px; }

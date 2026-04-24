@@ -95,6 +95,21 @@ const searchCache = new Map();
 // Observability for adaptive pacing (set inside gql()).
 let saw429Recently = false;
 
+// Set to the error message if a fatal AniList API error aborts the current run.
+let fatalApiError = null;
+
+function showApiErrorBanner(msg) {
+  // Reuse the runBanner for a persistent, hard-to-miss error notice.
+  if (el.runBannerTitle) el.runBannerTitle.textContent = "AniList error";
+  if (el.runBannerText) el.runBannerText.textContent = msg;
+  if (el.runBanner) {
+    el.runBanner.classList.remove("hidden");
+    el.runBanner.style.setProperty("--run-banner-bg", "rgba(232,93,117,.18)");
+    el.runBanner.style.setProperty("border-bottom-color", "rgba(232,93,117,.4)");
+  }
+  setProgressState("err");
+}
+
 /** @type {Map<number, {status?:string, progress?:number}>|null} */
 let localExistingByMediaId = null;
 
@@ -402,7 +417,15 @@ function init() {
 let _isRunning = false;
 function setRunningState(running, text) {
   _isRunning = Boolean(running);
-  if (el.runBanner) el.runBanner.classList.toggle("hidden", !running);
+  if (el.runBanner) {
+    el.runBanner.classList.toggle("hidden", !running);
+    // Reset error styling when starting a new run.
+    if (running) {
+      el.runBanner.style.removeProperty("--run-banner-bg");
+      el.runBanner.style.removeProperty("border-bottom-color");
+    }
+  }
+  if (running && el.runBannerTitle) el.runBannerTitle.textContent = "Working…";
   if (el.runBannerText && text) el.runBannerText.textContent = text;
 
   // Warn on refresh/close while running. Browsers show a generic message.
@@ -817,6 +840,7 @@ async function runPreview() {
   el.previewTableWrap.innerHTML = "";
   cachedExistingMediaIds = new Set();
   saw429Recently = false;
+  fatalApiError = null;
 
   /** @type {PreviewRow[]} */
   const rows = new Array(parsed.length);
@@ -891,8 +915,14 @@ async function runPreview() {
   };
 
   while (next < total || active > 0) {
+    if (fatalApiError) {
+      // Drain in-flight tasks then stop — no point hammering a downed API.
+      await Promise.all(Array.from(inFlight));
+      break;
+    }
     maybeAdjustFor429();
     while (next < total && active < limit) {
+      if (fatalApiError) break;
       const i = next++;
       active++;
       const p = (async () => {
@@ -909,7 +939,7 @@ async function runPreview() {
       await Promise.race(Array.from(inFlight));
     }
   }
-  bumpProgress(total, total, "Done");
+  bumpProgress(done, total, fatalApiError ? "Stopped" : "Done");
 
   previewRows = rows;
   // After we have selected media ids, check which ones already exist in the user's AniList.
@@ -1982,11 +2012,16 @@ async function gql(query, variables, { auth }) {
     const msg =
       json?.errors?.[0]?.message ||
       (snippet ? `HTTP ${res.status}: ${snippet}` : `HTTP ${res.status}`);
+    fatalApiError = msg;
+    showApiErrorBanner(msg);
     throw new Error(msg);
   }
   if (json?.errors?.length) {
     setProgressState("err");
-    throw new Error(json.errors[0]?.message || "AniList error");
+    const msg = json.errors[0]?.message || "AniList error";
+    fatalApiError = msg;
+    showApiErrorBanner(msg);
+    throw new Error(msg);
   }
   if (!auth && !hasLocalProxy && usedUrl && usedUrl !== ANILIST.graphqlUrl) {
     log(`Using AniList endpoint: ${usedUrl}`);
