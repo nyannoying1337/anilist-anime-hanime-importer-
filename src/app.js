@@ -102,7 +102,22 @@ let localExistingByMediaId = null;
 const TABLE_PAGE_SIZE = 80;
 let _tablePageCount = 1;
 
-init();
+// Catch any uncaught error and display it on the page so it's visible without DevTools.
+window.addEventListener("error", (e) => {
+  const b = document.createElement("div");
+  b.style.cssText = "position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:12px 16px;font:13px/1.5 monospace;z-index:99999;white-space:pre-wrap;word-break:break-all;";
+  b.textContent = "JS Error: " + e.message + "\n  " + e.filename + ":" + e.lineno + ":" + e.colno;
+  document.body.appendChild(b);
+});
+
+try {
+  init();
+} catch (e) {
+  const b = document.createElement("div");
+  b.style.cssText = "position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:12px 16px;font:13px/1.5 monospace;z-index:99999;white-space:pre-wrap;word-break:break-all;";
+  b.textContent = "Init failed: " + e.message + "\n" + (e.stack || "");
+  document.body.appendChild(b);
+}
 
 let currentProgress = null;
 let _progressWaitCount = 0;
