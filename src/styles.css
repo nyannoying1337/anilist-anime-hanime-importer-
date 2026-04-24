@@ -326,7 +326,7 @@ thead th {
   border-bottom: 1px solid var(--border);
   background: rgba(0,0,0,.20);
   position: sticky;
-  top: 0;
+  top: 58px;
   z-index: 2;
 }
 tbody td {
