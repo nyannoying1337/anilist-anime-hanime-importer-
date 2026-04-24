@@ -865,8 +865,8 @@ async function runPreview() {
       existingEntry: null,
       confidence: resolved.confidence ?? null,
       reason:
-        (attempts > 1 ? `Searched as “${usedQuery}” (fallback ${attempts}). ` : “”) +
-        (resolved.reason || “”),
+        (attempts > 1 ? `Searched as "${usedQuery}" (fallback ${attempts}). ` : "") +
+        (resolved.reason || ""),
     };
     done++;
     bumpProgress(done, total, rawTitle);
@@ -1347,7 +1347,7 @@ function renderMatchPicker(row, idx) {
 
   const hint = document.createElement("div");
   hint.className = "matchPickerHint";
-  hint.textContent = "Tip: type a new title and press “Search AniList”.";
+  hint.textContent = 'Tip: type a new title and press "Search AniList".';
 
   footer.appendChild(searchBtn);
   footer.appendChild(hint);
