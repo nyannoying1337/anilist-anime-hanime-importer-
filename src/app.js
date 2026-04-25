@@ -92,6 +92,10 @@ let cachedExistingMediaIds = new Set();
 /** @type {Map<string, Promise<{candidates:any[], usedQuery:string, attempts:number}>>} */
 const searchCache = new Map();
 
+// Per-variant cache: individual searchAnime(term) results shared across titles.
+/** @type {Map<string, Promise<any[]>>} */
+const variantSearchCache = new Map();
+
 // Observability for adaptive pacing (set inside gql()).
 let saw429Recently = false;
 
@@ -841,6 +845,7 @@ async function runPreview() {
   cachedExistingMediaIds = new Set();
   saw429Recently = false;
   fatalApiError = null;
+  variantSearchCache.clear();
 
   /** @type {PreviewRow[]} */
   const rows = new Array(parsed.length);
@@ -850,6 +855,23 @@ async function runPreview() {
   previewRows = rows;
   renderPreviewTable();
   renderSummary();
+
+  // Batch pre-fetch: warm variantSearchCache with all unique first-variant terms
+  // before the per-title loop starts. Bundles 8 searches per HTTP request via
+  // GraphQL aliases, reducing round-trips by ~8× compared to one-per-title.
+  {
+    const firstVariants = [...new Set(
+      parsed.map((p) => normalizeTitle(buildSearchVariants(p.normalizedTitle)[0]).toLowerCase())
+    )];
+    const BATCH = 8;
+    const batchTotal = Math.ceil(firstVariants.length / BATCH);
+    for (let b = 0; b < firstVariants.length; b += BATCH) {
+      if (fatalApiError) break;
+      const chunk = firstVariants.slice(b, b + BATCH);
+      setProgress({ label: "Pre-fetching…", current: Math.floor(b / BATCH), total: batchTotal, meta: "Batch search" });
+      await prefetchVariantBatch(chunk);
+    }
+  }
 
   let lastRenderAt = 0;
   const maybeRender = (force) => {
@@ -1797,6 +1819,8 @@ function similarity(a, b) {
 }
 
 async function searchAnime(title) {
+  const key = normalizeTitle(title).toLowerCase();
+  if (variantSearchCache.has(key)) return variantSearchCache.get(key);
   const query = `
     query ($search: String) {
       Page(perPage: 20) {
@@ -1812,8 +1836,33 @@ async function searchAnime(title) {
       }
     }
   `;
-  const data = await gql(query, { search: title }, { auth: false });
-  return data?.Page?.media ?? [];
+  const p = gql(query, { search: title }, { auth: false }).then((d) => d?.Page?.media ?? []);
+  variantSearchCache.set(key, p);
+  return p;
+}
+
+async function prefetchVariantBatch(terms) {
+  if (!terms.length) return;
+  const fields = terms
+    .map(
+      (term, i) => `
+    s${i}: Page(perPage: 20) {
+      media(search: ${JSON.stringify(term)}, type: ANIME, sort: SEARCH_MATCH) {
+        id seasonYear format isAdult synonyms siteUrl
+        title { romaji english native }
+      }
+    }`
+    )
+    .join("\n");
+  try {
+    const data = await gql(`{ ${fields} }`, {}, { auth: false });
+    for (let i = 0; i < terms.length; i++) {
+      const results = data?.[`s${i}`]?.media ?? [];
+      variantSearchCache.set(terms[i], results);
+    }
+  } catch (e) {
+    log(`Batch pre-fetch failed (will retry individually): ${e?.message}`);
+  }
 }
 
 async function runImport() {
