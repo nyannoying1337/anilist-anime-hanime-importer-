@@ -2,6 +2,7 @@ import http.server
 import json
 import os
 import re
+import threading
 import time
 import urllib.request
 import urllib.parse
@@ -41,6 +42,14 @@ class RateLimiter:
 
 
 rl = RateLimiter(min_gap_ms=900)
+
+# Server-side response cache for public (non-auth) GraphQL queries.
+# Keyed by SHA-256 of the raw request body; value is (stored_timestamp, response_bytes).
+# Avoids redundant AniList round-trips for repeated or shared search terms.
+_graphql_cache: dict[bytes, tuple[float, bytes]] = {}
+_graphql_cache_lock = threading.Lock()
+_CACHE_TTL_S = 4 * 3600  # 4 hours — public anime metadata changes rarely
+
 
 def parse_retry_after_ms(value):
     if not value:
@@ -110,6 +119,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         ua = self.headers.get("User-Agent") or DEFAULT_UA
         accept_lang = self.headers.get("Accept-Language") or "en-US,en;q=0.9"
 
+        # Check server-side cache for unauthenticated requests only.
+        # Authenticated requests may be user-specific mutations; never cache those.
+        cache_key = None
+        if not auth:
+            cache_key = hashlib.sha256(body).digest()
+            _now = time.time()
+            with _graphql_cache_lock:
+                _hit = _graphql_cache.get(cache_key)
+            if _hit and (_now - _hit[0]) < _CACHE_TTL_S:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(_hit[1])
+                return
+
         last_err = None
         for endpoint in ANILIST_ENDPOINTS:
             try:
@@ -142,6 +167,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             self.send_header("Access-Control-Allow-Origin", "*")
                             self.end_headers()
                             self.wfile.write(resp_body)
+                            if cache_key and resp.status == 200:
+                                with _graphql_cache_lock:
+                                    _graphql_cache[cache_key] = (time.time(), resp_body)
                             return
                     except HTTPError as e:
                         if e.code == 429 and attempt < 6:
